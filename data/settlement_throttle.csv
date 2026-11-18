@@ -1,0 +1,14 @@
+# Independently funded trades allow a settlement backlog to be demonstrated.
+ACCOUNT,BUYER,100000,0
+ACCOUNT,SELLER1,0,3
+ACCOUNT,SELLER2,0,2
+ACCOUNT,SELLER3,0,1
+PLACE,s1,SELLER1,SELL,3,5000
+PLACE,b1,BUYER,BUY,3,5000
+PLACE,s2,SELLER2,SELL,2,6000
+PLACE,b2,BUYER,BUY,2,6000
+PLACE,s3,SELLER3,SELL,1,7000
+PLACE,b3,BUYER,BUY,1,7000
+SETTLE,1
+# Two trades remain in escrow and cannot be reused yet.
+SETTLE,1

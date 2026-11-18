@@ -1,0 +1,25 @@
+# Build products
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+Testing/
+compile_commands.json
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+*.gcda
+*.gcno
+# Generated reports and local state
+*.log
+*.profraw
+*.profdata
+coverage/
+.env
+.DS_Store
+.idea/
+.vscode/
+__pycache__/
+*.pyc

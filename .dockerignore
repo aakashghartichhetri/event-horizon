@@ -1,0 +1,10 @@
+.git
+.github
+build
+cmake-build-*
+.vscode
+.idea
+*.log
+*.zip
+.env
+__pycache__

@@ -1,0 +1,9 @@
+# Exchange outage prevents new matching; old orders remain reserved.
+ACCOUNT,BUYER,20000,0
+ACCOUNT,SELLER,0,2
+PLACE,ask1,SELLER,SELL,2,5000
+EXCHANGE_DOWN
+PLACE,buy_during_outage,BUYER,BUY,2,5000
+EXCHANGE_UP
+PLACE,buy_after_restart,BUYER,BUY,2,5000
+SETTLE
