@@ -2,122 +2,110 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#0a1020">
-  <meta name="description" content="EVENT HORIZON — explore how financial infrastructure failures propagate across a simulated exchange and clearing network.">
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b111c">
+  <meta name="description" content="Event Horizon is a hands-on laboratory for exploring how payment failures and exchange outages travel through a financial network.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
-  <title>EVENT HORIZON — Financial Instability Lab</title>
-  <script type="module" src="/app.js"></script>
+  <script src="/app.js" type="module"></script>
+  <title>Event Horizon — Financial Systems Lab</title>
 </head>
 <body>
-<div class="shell">
-  <aside class="sidebar">
-    <div class="brand">
-      <div class="brand-icon" aria-hidden="true"><span></span></div>
-      <div><strong>EVENT HORIZON</strong><small>FINANCIAL INSTABILITY LAB</small></div>
+  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+    <symbol id="ic-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="ic-network" viewBox="0 0 24 24"><circle cx="5" cy="5" r="2.2"/><circle cx="19" cy="8" r="2.2"/><circle cx="8" cy="19" r="2.2"/><path d="M7 5.5l9.8 2M6.1 7.1l1.3 9.6m9.9-7.2l-7.7 8"/></symbol>
+    <symbol id="ic-ledger" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></symbol>
+    <symbol id="ic-compare" viewBox="0 0 24 24"><path d="M3 7h18M3 17h18M7 3l-4 4 4 4m10 2l4 4-4 4"/></symbol>
+<symbol id="ic-grid-lab" viewBox="0 0 24 24"><path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/></symbol>
+    <symbol id="ic-code" viewBox="0 0 24 24"><path d="m8 6-6 6 6 6m8-12 6 6-6 6m-3-9-2 18"/></symbol>
+    <symbol id="ic-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></symbol>
+    <symbol id="ic-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+    <symbol id="ic-back" viewBox="0 0 24 24"><path d="m14 5-7 7 7 7"/></symbol>
+    <symbol id="ic-next" viewBox="0 0 24 24"><path d="m10 5 7 7-7 7"/></symbol>
+    <symbol id="ic-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.5 9a7.5 7.5 0 0 1 12.6-2L20 12M4 12l1.9 5a7.5 7.5 0 0 0 12.6-2"/></symbol>
+    <symbol id="ic-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/></symbol>
+    <symbol id="ic-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-7-7 7 7-7 7"/></symbol>
+    <symbol id="ic-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v.2"/></symbol>
+    <symbol id="ic-menu" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></symbol>
+    <symbol id="ic-close" viewBox="0 0 24 24"><path d="M5 5l14 14M19 5 5 19"/></symbol>
+    <symbol id="ic-check" viewBox="0 0 24 24"><path d="m4 12 5 5L20 6"/></symbol>
+    <symbol id="ic-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l4 2"/></symbol>
+    <symbol id="ic-save" viewBox="0 0 24 24"><path d="M4 3h13l3 3v15H4zM8 3v7h8V3M8 21v-8h8v8"/></symbol>
+  </svg>
+  <div class="app-layout">
+    <div class="nav-backdrop" id="nav-backdrop" hidden></div>
+    <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+      <div class="brand"><div class="brand-mark" aria-hidden="true"><span class="brand-ring"></span><span class="brand-core"></span></div><div class="brand-text"><strong>EVENT HORIZON</strong><span>Financial systems lab</span></div></div>
+      <div class="workspace-pill"><span class="workspace-dot"></span><span>Research workspace</span><span class="workspace-count">01</span></div>
+      <div class="sidebar-scroll">
+        <p class="nav-heading">WORKSPACE</p>
+        <nav class="main-nav" aria-label="Views">
+          <button type="button" class="nav-item active" data-view="overview"><svg class="icon"><use href="#ic-grid"/></svg><span>Overview</span><span class="nav-key">01</span></button>
+          <button type="button" class="nav-item" data-view="network"><svg class="icon"><use href="#ic-network"/></svg><span>Network map</span><span class="nav-key">02</span></button>
+          <button type="button" class="nav-item" data-view="ledger"><svg class="icon"><use href="#ic-ledger"/></svg><span>Trade ledger</span><span class="nav-key">03</span></button>
+          <button type="button" class="nav-item" data-view="comparison"><svg class="icon"><use href="#ic-compare"/></svg><span>Compare outcomes</span><span class="nav-key">04</span></button>
+          <button type="button" class="nav-item" data-view="resilience"><svg class="icon"><use href="#ic-grid-lab"/></svg><span>Resilience lab</span><span class="nav-key">05</span></button>
+          <button type="button" class="nav-item" data-view="workbench"><svg class="icon"><use href="#ic-code"/></svg><span>Workbench</span><span class="nav-key">06</span></button>
+        </nav>
+        <div class="heading-row"><p class="nav-heading">EXPERIMENTS</p><span class="scenario-count" id="scenario-count">—</span></div>
+        <div class="scenario-nav" id="scenario-nav" aria-label="Built-in experiments"></div>
+      </div>
+      <div class="sidebar-foot"><div class="sidebar-note"><span class="small-ring" aria-hidden="true"></span><div><strong>Made to be tested.</strong><p>No real money. No live market data. Every run can be replayed.</p></div></div><div class="sidebar-version">C++20 ENGINE <span>•</span> LOCAL LAB</div></div>
+    </aside>
+
+    <div class="app-main">
+      <header class="topbar">
+        <div class="topbar-start"><button id="menu-toggle" class="icon-button menu-button" type="button" aria-label="Open navigation" aria-expanded="false"><svg class="icon"><use href="#ic-menu"/></svg></button><div class="breadcrumbs"><span>EVENT HORIZON</span><span class="crumb-divider">/</span><strong id="view-breadcrumb">Overview</strong></div></div>
+        <div class="topbar-end"><div class="connection" id="connection-badge"><span class="connection-dot"></span><span id="connection-label">Connecting</span></div><button id="guide-button" class="text-action" type="button"><svg class="icon"><use href="#ic-info"/></svg>About the model</button><button id="download-button" class="icon-button top-download" type="button" title="Download current simulation as JSON" aria-label="Download simulation JSON"><svg class="icon"><use href="#ic-download"/></svg></button></div>
+      </header>
+
+      <main class="main-content" id="main-content">
+        <div class="error-banner" id="error-banner" role="alert" hidden><span id="error-message"></span><button class="icon-button" id="dismiss-error" type="button" aria-label="Dismiss error"><svg class="icon"><use href="#ic-close"/></svg></button></div>
+
+        <section class="view" id="view-overview" aria-labelledby="hero-title">
+          <div class="hero">
+            <div class="hero-copy"><div class="eyebrow"><span class="eyebrow-line"></span> FINANCIAL SYSTEMS / INCIDENT LAB</div><h1 id="hero-title">Follow the failure.<br><em>Find the fix.</em></h1><p>Explore what really happens between a matched trade and settled money. Run a disruption, trace its impact, and test the decisions that change the outcome.</p><div class="hero-actions"><button id="hero-play" class="button button-primary" type="button"><svg class="icon"><use href="#ic-play"/></svg>Walk through this case</button><button class="button button-subtle" type="button" data-switch-view="comparison">Compare responses <svg class="icon"><use href="#ic-arrow"/></svg></button></div></div>
+            <div class="hero-art" aria-hidden="true"><div class="art-grid"></div><div class="art-line art-line-a"></div><div class="art-line art-line-b"></div><div class="art-line art-line-c"></div><div class="art-orbit art-orbit-a"></div><div class="art-orbit art-orbit-b"></div><span class="art-node node-a"></span><span class="art-node node-b"></span><span class="art-node node-c"></span><span class="art-node node-d"></span><div class="art-caption"><span class="caption-dot"></span> OBSERVE · EXPLAIN · COMPARE</div></div>
+          </div>
+
+          <div class="section-title scenario-heading"><div><p class="section-kicker" id="story-eyebrow">SCENARIO IN FOCUS</p><h2 id="story-title">Loading experiment…</h2><p class="section-description" id="story-description">Connecting to the simulation engine.</p></div><div class="status-tags"><span class="state-chip" id="exchange-chip"><span class="chip-dot"></span><span id="exchange-label">Exchange online</span></span><span class="state-chip" id="payments-chip"><span class="chip-dot"></span><span id="payments-label">Payments online</span></span></div></div>
+
+          <div class="metrics-grid" aria-label="Metrics at the selected event"><article class="metric-card"><div class="metric-top"><span>Trades matched</span><svg class="icon"><use href="#ic-compare"/></svg></div><strong id="metric-matched">—</strong><p>Orders that found a counterparty</p></article><article class="metric-card"><div class="metric-top"><span>Trades settled</span><svg class="icon"><use href="#ic-check"/></svg></div><strong id="metric-settled">—</strong><p>Cash and shares delivered</p></article><article class="metric-card"><div class="metric-top"><span>Orders rejected</span><span class="metric-symbol">!</span></div><strong id="metric-rejected">—</strong><p>Unable to trade under current rules</p></article><article class="metric-card metric-feature"><div class="metric-top"><span>Cash waiting in clearing</span><svg class="icon"><use href="#ic-clock"/></svg></div><strong id="metric-escrow">—</strong><p>Matched proceeds not yet received</p></article></div>
+
+          <div class="takeaway-card"><div class="takeaway-icon">i</div><div><span class="tiny-overline">THE BIG PICTURE</span><p id="story-takeaway">An executed trade is different from a settled trade.</p></div><button type="button" class="text-link" data-switch-view="comparison">Explore the alternatives <svg class="icon"><use href="#ic-arrow"/></svg></button></div>
+
+          <div class="section-title spaced-title"><div><p class="section-kicker">EVENT REPLAY</p><h2>See the ripple effect, step by step.</h2></div><span class="section-small">Each event comes from the C++ simulation</span></div>
+          <div class="analysis-grid">
+            <section class="panel chart-panel"><div class="panel-heading"><div><span class="tiny-overline">SETTLEMENT PRESSURE</span><h3>Cash held in clearing</h3></div><span class="micro-pill"><span class="mini-dot orange"></span>Unsettled proceeds</span></div><div class="chart-container" id="pressure-chart" aria-label="Clearing cash throughout the replay" role="img"></div><div class="chart-caption"><span>Illustrative time = ordered events, not elapsed seconds</span><span id="chart-peak">Peak: —</span></div><div class="playback"><div class="playback-head"><strong id="playback-step">Event 0 of 0</strong><span id="playback-label">Ready to replay</span></div><input id="step-slider" type="range" min="0" max="0" value="0" aria-label="Replay event position"><div class="playback-actions"><div class="transport"><button id="step-back" class="control-button" type="button" aria-label="Previous event"><svg class="icon"><use href="#ic-back"/></svg></button><button id="play-pause" class="control-button control-primary" type="button" aria-label="Play replay"><svg class="icon"><use href="#ic-play"/></svg></button><button id="step-forward" class="control-button" type="button" aria-label="Next event"><svg class="icon"><use href="#ic-next"/></svg></button></div><div class="playback-speed"><span>Playback</span><select id="playback-rate" aria-label="Playback speed"><option value="1100">Slow</option><option value="720" selected>Normal</option><option value="350">Fast</option></select></div></div></div></section>
+            <section class="panel inspector-panel"><div class="panel-heading"><div><span class="tiny-overline">EVENT INSPECTOR</span><h3>What changed?</h3></div><span class="inspector-position" id="inspector-position">START</span></div><div class="event-inspector" id="event-inspector"><p>Choose an event to inspect it.</p></div><div class="inspector-history-header"><strong>Event history</strong><span id="event-history-count">0 events</span></div><div class="event-history" id="event-history" aria-label="Replay event history"></div></section>
+          </div>
+
+          <div class="overview-bottom"><section class="panel network-card"><div class="panel-heading"><div><span class="tiny-overline">COUNTERPARTY RELATIONSHIPS</span><h3>Who depends on whom?</h3></div><button type="button" class="text-link" data-switch-view="network">Full network <svg class="icon"><use href="#ic-arrow"/></svg></button></div><div id="network-overview" class="network-viz"></div><div class="legend"><span><i class="legend-dot green"></i>Settled trade</span><span><i class="legend-dot amber"></i>Pending trade</span><span><i class="legend-dot quiet"></i>No matched trade</span></div></section><section class="panel outcomes-card"><div class="panel-heading"><div><span class="tiny-overline">EXPERIMENT RESULT</span><h3>What the run tells us</h3></div></div><div class="outcome-body"><div class="outcome-status" id="outcome-status">—</div><p id="outcome-note">Results are based on the full run.</p><div class="outcome-figures"><div><span>Trades awaiting delivery</span><strong id="outcome-pending">—</strong></div><div><span>Highest clearing balance</span><strong id="outcome-peak">—</strong></div><div><span>Invariants checked</span><strong id="outcome-invariants">—</strong></div></div><p class="outcome-footnote">Outcome classification is descriptive, not a credit or systemic-risk rating.</p></div></section></div>
+          <div class="section-title spaced-title"><div><p class="section-kicker">CHANGE THE OUTCOME</p><h2>Same system. Different decision.</h2></div><button type="button" class="text-link" data-switch-view="comparison">See all experiments <svg class="icon"><use href="#ic-arrow"/></svg></button></div><div class="related-grid" id="related-grid"></div>
+        </section>
+
+        <section class="view" id="view-network" hidden><div class="page-heading"><span class="section-kicker">PARTICIPANT RELATIONSHIPS</span><h1>Every trade connects two balance sheets.</h1><p>The arrows show share delivery from seller to buyer. Hover or select a participant to inspect their position. This map shows the end of the run.</p></div><div class="network-layout"><section class="panel network-stage"><div class="panel-heading"><div><span class="tiny-overline">EXECUTED TRADE LINKS</span><h3>Settlement network</h3></div><div class="segmented" id="network-filter" aria-label="Filter trade links"><button class="active" type="button" data-filter="all">All</button><button type="button" data-filter="settled">Settled</button><button type="button" data-filter="pending">Pending</button></div></div><div id="network-full" class="network-viz full-network"></div><div class="legend legend-padded"><span><i class="legend-dot green"></i>Settled</span><span><i class="legend-dot amber"></i>Pending</span><span class="legend-note">Arrows: seller → buyer</span></div></section><aside class="panel participant-panel"><div class="panel-heading"><div><span class="tiny-overline">PARTICIPANT DETAIL</span><h3 id="participant-title">Select a firm</h3></div></div><div id="participant-detail" class="participant-detail"></div></aside></div><section class="panel directory-panel"><div class="panel-heading"><div><span class="tiny-overline">END-OF-RUN POSITIONS</span><h3>Participant directory</h3></div><span id="account-count" class="micro-pill">— accounts</span></div><div class="responsive-table"><table><thead><tr><th>Participant</th><th>Available cash</th><th>Reserved cash</th><th>Available shares</th><th>Trades</th></tr></thead><tbody id="participant-table"></tbody></table></div></section></section>
+
+        <section class="view" id="view-ledger" hidden><div class="page-heading"><span class="section-kicker">ACCOUNTING & DELIVERY</span><h1>What traded, and what actually settled?</h1><p>A match creates a clearing obligation. Only settlement delivers cash to the seller and shares to the buyer.</p></div><div class="ledger-summary"><article><span>Matched notional</span><strong id="ledger-notional">—</strong></article><article><span>Trades delivered</span><strong id="ledger-settled">—</strong></article><article><span>Still in clearing</span><strong id="ledger-cash">—</strong></article><article><span>Unpaid loans</span><strong id="ledger-loans">—</strong></article></div><section class="panel ledger-panel"><div class="panel-heading"><div><span class="tiny-overline">EXECUTION RECORD</span><h3>Trade ledger</h3></div><div class="panel-actions"><select id="trade-filter" aria-label="Filter trades"><option value="all">All trades</option><option value="settled">Settled</option><option value="pending">Pending</option></select><button type="button" class="button button-small button-outline" id="export-ledger"><svg class="icon"><use href="#ic-download"/></svg>Export CSV</button></div></div><div class="responsive-table"><table><thead><tr><th>ID</th><th>Seller → Buyer</th><th>Quantity</th><th>Execution price</th><th>Notional</th><th>Delivery</th></tr></thead><tbody id="trades-table"></tbody></table></div></section><div class="ledger-note"><svg class="icon"><use href="#ic-info"/></svg><p>All quantities and money are simulated. Cash is tracked as integer cents; order reservations and pending settlements are checked against conservation rules after every event.</p></div></section>
+
+        <section class="view" id="view-comparison" hidden><div class="page-heading"><span class="section-kicker">COUNTERFACTUAL ANALYSIS</span><h1>What changes when you intervene?</h1><p>Choose two built-in experiments and compare the actual C++ results. Different starting conditions are shown as separate demonstrations, not controlled trials.</p></div><div class="comparison-selectors"><label><span>FIRST EXPERIMENT</span><select id="compare-a"></select></label><div class="comparison-vs">VS</div><label><span>SECOND EXPERIMENT</span><select id="compare-b"></select></label></div><section class="panel comparison-panel"><div class="panel-heading"><div><span class="tiny-overline">SIDE-BY-SIDE RESULTS</span><h3>Operational outcomes</h3></div><span class="micro-pill">Final state</span></div><div id="comparison-chart" class="comparison-chart"></div><div class="responsive-table"><table><thead><tr><th>Measure</th><th id="compare-name-a">Experiment A</th><th id="compare-name-b">Experiment B</th><th>Change (B − A)</th></tr></thead><tbody id="compare-table"></tbody></table></div></section><div class="comparison-insight"><span class="tiny-overline">READ THIS CAREFULLY</span><p id="comparison-context">Comparisons reveal model behavior. They do not predict what would happen at a real exchange.</p></div><div class="section-title spaced-title"><div><p class="section-kicker">EXPERIMENT LIBRARY</p><h2>Explore all nine operating conditions.</h2></div></div><div class="experiment-gallery" id="experiment-gallery"></div></section>
+
+        <section class="view" id="view-resilience" hidden aria-labelledby="resilience-title">
+          <div class="page-heading"><span class="section-kicker">CONTROLLED EXPERIMENT · 12 REPRODUCIBLE CASES</span><h1 id="resilience-title">How much time does recovery buy?</h1><p>A payment failure leaves $400 waiting in clearing. Change one response at a time: when the payment rail returns, and how much pre-funded help firms receive. Follow the consequences across the same three intended trades.</p></div>
+          <div class="resilience-intro"><div><span class="tiny-overline">THE QUESTION</span><h2>Can a timely repair—or a temporary cash bridge—stop one failed payment from becoming three failed trades?</h2><p>Every case starts with the same firms, initial cash, shares and orders. The server replays each variation independently and checks the same accounting rules.</p></div><div class="resilience-seal"><span>12</span><strong>fully deterministic<br>experiments</strong><small>No estimated probabilities<br>No synthetic risk score</small></div></div>
+          <div class="resilience-stats" id="resilience-stats" aria-live="polite"><span>Loading controlled experiments…</span></div>
+          <div class="resilience-layout"><section class="panel resilience-panel"><div class="panel-heading"><div><span class="tiny-overline">RECOVERY WINDOW × LIQUIDITY SUPPORT</span><h3>Explore the intervention grid</h3></div><button type="button" id="resilience-export" class="button button-small button-outline">Export results</button></div><p class="resilience-help">Each cell shows settled trades out of three. Select a case to inspect the matched trades, remaining obligations and debt. A later restoration does not undo a rejected order.</p><div class="resilience-scroll"><div id="resilience-grid" class="resilience-grid" aria-label="Recovery matrix"></div></div><div class="resilience-legend"><span><i class="resilience-key complete"></i> All three settled</span><span><i class="resilience-key partial"></i> Some settled</span><span><i class="resilience-key blocked"></i> None settled</span></div></section>
+          <aside class="panel resilience-inspector" id="resilience-detail" aria-live="polite"><div class="resilience-loading">Choose a cell to inspect an outcome.</div></aside></div>
+          <div class="resilience-method"><svg class="icon" aria-hidden="true"><use href="#ic-info"/></svg><p><strong>Read this as a controlled model, not a market forecast.</strong> The grid compares deterministic outcomes under fixed opening conditions. Facility cash is transferred from an existing account, never created. Results are not probabilities, systemic risk ratings, or empirical estimates.</p></div>
+        </section>
+
+        <section class="view" id="view-workbench" hidden><div class="page-heading"><span class="section-kicker">YOUR EXPERIMENT</span><h1>Change the sequence. Test the consequences.</h1><p>Edit a scenario in plain text, run it against the real engine, and review the outcome. Every custom run starts from a clean state.</p></div><div class="workbench-grid"><section class="panel editor-panel"><div class="panel-heading"><div><span class="tiny-overline">SCENARIO SCRIPT</span><h3>Event editor</h3></div><span class="micro-pill">CSV · INTEGER CENTS</span></div><label class="editor-label" for="csv-input">Ordered commands</label><textarea id="csv-input" spellcheck="false" autocapitalize="off" autocomplete="off" aria-describedby="editor-help"></textarea><div class="editor-meta"><span id="editor-help">One command per line. Maximum 500 events and 64 KB.</span><span id="editor-lines">0 lines</span></div><div class="editor-toolbar"><button id="run-custom" class="button button-primary" type="button"><svg class="icon"><use href="#ic-play"/></svg>Run experiment</button><button id="reset-editor" class="button button-outline" type="button">Reset to selected case</button><button id="download-csv" class="button button-outline" type="button"><svg class="icon"><use href="#ic-download"/></svg>CSV</button></div><div class="editor-results" id="editor-results" hidden role="status"></div></section><div class="workbench-side"><section class="panel reference-panel"><div class="panel-heading"><div><span class="tiny-overline">QUICK REFERENCE</span><h3>Commands you can use</h3></div></div><div class="command-reference"><div><code>ACCOUNT</code><p>Give a firm simulated cash and shares.</p></div><div><code>PLACE</code><p>Submit a BUY or SELL limit order.</p></div><div><code>PAYMENTS_DOWN</code><p>Pause the settlement rail.</p></div><div><code>PAYMENTS_UP</code><p>Restore payment processing.</p></div><div><code>SETTLE</code><p>Deliver queued trades when available.</p></div><div><code>LEND</code><p>Transfer money from a funded facility.</p></div></div><p class="reference-foot">Full command rules are in <code>docs/ENGINEERING.md</code>. Invalid commands return line-numbered errors.</p></section><section class="panel saved-panel"><div class="panel-heading"><div><span class="tiny-overline">YOUR BROWSER</span><h3>Saved experiments</h3></div></div><div class="saved-input"><label for="save-name">Give this scenario a name</label><div class="save-row"><input id="save-name" type="text" maxlength="45" placeholder="e.g. Payment recovery at step 8"><button id="save-experiment" type="button" class="button button-outline"><svg class="icon"><use href="#ic-save"/></svg>Save</button></div></div><div id="saved-experiments" class="saved-list"></div><p class="reference-foot">Stored only in this browser. Export the CSV to keep a portable copy.</p></section></div></div></section>
+
+        <footer class="footer"><span><span class="footer-mark">◉</span> EVENT HORIZON <span class="footer-dot">·</span> EXPERIMENTAL SYSTEMS LAB</span><span>SIMULATED MARKETS ONLY <span class="footer-dot">·</span> NO LIVE FINANCIAL DATA</span></footer>
+      </main>
     </div>
-    <div class="side-label">SCENARIOS</div>
-    <nav id="scenario-list" aria-label="Simulation scenarios"></nav>
-    <div class="sidebar-bottom">
-      <div class="sidebar-card">
-        <div class="tiny-overline">MODEL</div>
-        <strong>Deterministic, not predictive.</strong>
-        <p>One synthetic asset · integer-cent accounting · no live market data.</p>
-      </div>
-      <div class="side-footer">C++20 CORE <span>·</span> 1.0.0</div>
-    </div>
-  </aside>
-  <div class="main-shell">
-    <header class="topbar">
-      <div class="breadcrumb"><span class="muted">LABORATORY</span><span class="slash">/</span><span id="crumb-title">Overview</span></div>
-      <div class="top-actions">
-        <span id="api-pill" class="api-pill"><span class="api-dot"></span><span id="api-status">Connecting</span></span>
-        <a class="guide-link" href="#documentation">How it works ↗</a>
-      </div>
-    </header>
-    <main class="content">
-      <section class="hero">
-        <div class="eyebrow"><span class="live-dot"></span> SYSTEMIC RISK OBSERVATORY <span class="hero-index">EH / 001</span></div>
-        <h1>When one system fails,<br><em>what fails next?</em></h1>
-        <p>Inject a financial infrastructure shock. Follow trade execution, clearing, liquidity constraints, and recovery through a reproducible network.</p>
-        <div class="hero-actions">
-          <button id="run-button" class="btn btn-primary" type="button">↻ &nbsp; Re-run simulation</button>
-          <button id="compare-button" class="btn btn-outline" type="button">⇄ &nbsp; Compare scenarios</button>
-        </div>
-        <div class="orb orb-one" aria-hidden="true"></div><div class="orb orb-two" aria-hidden="true"></div>
-      </section>
-
-      <section class="scenario-intro">
-        <div><div class="section-kicker">ACTIVE EXPERIMENT</div><h2 id="scenario-title">Loading scenario…</h2><p id="scenario-description" class="section-desc">Retrieving deterministic replay.</p></div>
-        <div class="scenario-tags"><span class="tag" id="status-exchange">Exchange —</span><span class="tag" id="status-payments">Payments —</span><span class="tag success">✓ Invariants</span></div>
-      </section>
-
-      <div id="alert" class="alert" hidden role="alert"></div>
-
-      <section class="metrics" aria-label="Simulation metrics">
-        <article class="metric"><div class="metric-label">TRADES EXECUTED<span>↗</span></div><strong id="m-executed">—</strong><div class="metric-detail">Matched in the exchange</div></article>
-        <article class="metric"><div class="metric-label">TRADES SETTLED<span>✓</span></div><strong id="m-settled">—</strong><div class="metric-detail">Cash and shares delivered</div></article>
-        <article class="metric"><div class="metric-label">REJECTED ORDERS<span>!</span></div><strong id="m-rejected">—</strong><div class="metric-detail">Insufficient funds / controls</div></article>
-        <article class="metric accent"><div class="metric-label">CASH IN CLEARING<span>◇</span></div><strong id="m-escrow">—</strong><div class="metric-detail">Unsettled sale proceeds</div></article>
-      </section>
-
-      <div class="two-column">
-        <section class="panel" id="chart-panel">
-          <div class="panel-head"><div><div class="section-kicker">CLEARING PRESSURE</div><h3>Cash trapped in escrow</h3></div><span class="panel-sub" id="event-count">Events: —</span></div>
-          <div id="escrow-chart" class="chart-space" role="img" aria-label="Escrow balance over replay events"></div>
-          <div class="chart-bottom"><span><i class="legend-line"></i> Clearing cash over event sequence</span><span>USD</span></div>
-        </section>
-        <section class="panel network-panel">
-          <div class="panel-head"><div><div class="section-kicker">EXECUTION GRAPH</div><h3>Who traded with whom?</h3></div><span class="panel-sub">Seller → Buyer</span></div>
-          <div id="network" class="network" aria-label="Trading relationships"></div>
-          <div class="network-footer"><span class="dot-mini teal"></span> Executed&nbsp;&nbsp; <span class="dot-mini amber"></span> Pending&nbsp;&nbsp; <span class="dot-mini dim"></span> No trade</div>
-        </section>
-      </div>
-
-      <section id="comparison-section" class="panel compare-panel" hidden>
-        <div class="panel-head"><div><div class="section-kicker">COUNTERFACTUAL ANALYSIS</div><h3>Compare interventions</h3></div><button id="close-compare" class="text-button" type="button">Close ×</button></div>
-        <p class="muted small">Each row is a fresh replay. Most scenarios share the same starting cash; settlement capacity and exchange-outage examples use a separate test network.</p>
-        <div id="comparison-chart" class="compare-chart"></div>
-        <div id="comparison-table" class="table-wrap"></div>
-      </section>
-
-      <div class="two-column lower-grid">
-        <section class="panel">
-          <div class="panel-head"><div><div class="section-kicker">LEDGER</div><h3>Participant balances</h3></div><span class="panel-sub">Cash in cents · one asset</span></div>
-          <div class="table-wrap"><table><thead><tr><th>Participant</th><th>Free cash</th><th>Reserved</th><th>Shares</th></tr></thead><tbody id="accounts-body"></tbody></table></div>
-        </section>
-        <section class="panel">
-          <div class="panel-head"><div><div class="section-kicker">CLEARING HOUSE</div><h3>Trade settlement ledger</h3></div><span class="panel-sub" id="pending-count">0 pending</span></div>
-          <div class="table-wrap"><table><thead><tr><th>Seller → Buyer</th><th>Amount</th><th>State</th></tr></thead><tbody id="trades-body"></tbody></table></div>
-        </section>
-      </div>
-
-      <section class="panel timeline-panel">
-        <div class="panel-head"><div><div class="section-kicker">FORENSIC REPLAY</div><h3>Every event. Same outcome.</h3></div><span class="panel-sub" id="timeline-caption">Chronological event log</span></div>
-        <div class="table-wrap timeline-scroll"><table><thead><tr><th>#</th><th>Event</th><th>Result</th><th>Pending</th><th>Escrow</th></tr></thead><tbody id="timeline-body"></tbody></table></div>
-      </section>
-
-      <section class="panel editor-panel">
-        <div class="panel-head"><div><div class="section-kicker">EXPERIMENT EDITOR</div><h3>Change the failure. Re-run the system.</h3></div><span class="panel-sub">Strict CSV event commands</span></div>
-        <p class="muted small">Edit the scenario, then replay it in an isolated C++ engine. Your changes are not saved to the server.</p>
-        <label class="editor-label" for="csv-input">SCENARIO EVENTS (CENTS, NOT DOLLARS)</label>
-        <textarea id="csv-input" spellcheck="false" aria-label="Editable CSV scenario"></textarea>
-        <div class="editor-actions"><button id="run-custom" class="btn btn-primary" type="button">▶ &nbsp; Run custom scenario</button><button id="reset-editor" class="btn btn-outline" type="button">Reset editor</button><button id="export-json" class="btn btn-outline" type="button">↓ &nbsp; Export results JSON</button><span class="editor-hint" id="editor-hint">Maximum 64 KB, 500 events</span></div>
-      </section>
-
-      <section class="method" id="documentation">
-        <div class="section-kicker">ENGINEERING NOTES</div><h2>Designed for explanation, not speculation.</h2>
-        <div class="method-grid">
-          <div><span class="method-num">01</span><h3>Exchange</h3><p>Limit orders match at the resting price with price-time priority. Cash and shares are reserved before orders rest on the book.</p></div>
-          <div><span class="method-num">02</span><h3>Clearing</h3><p>Matched cash and shares enter escrow until settlement. A payments outage prevents those assets from being spent again.</p></div>
-          <div><span class="method-num">03</span><h3>Conservation</h3><p>All money and shares are conserved across accounts and escrow. Funded facility loans transfer existing cash, not newly created balances.</p></div>
-          <div><span class="method-num">04</span><h3>Determinism</h3><p>The same ordered CSV commands produce identical trades, audit events, and end balances. No wall-clock ordering or random market feeds.</p></div>
-        </div>
-      </section>
-      <footer class="footer"><span>EVENT HORIZON · A SIMULATED FINANCIAL SYSTEM</span><span>NO REAL MONEY · NO LIVE TRADING · C++20</span></footer>
-    </main>
   </div>
-</div>
+  <dialog class="about-dialog" id="about-dialog" aria-labelledby="about-title"><button type="button" id="close-about" class="icon-button close-dialog" aria-label="Close"><svg class="icon"><use href="#ic-close"/></svg></button><div class="dialog-mark">EH / 01</div><h2 id="about-title">A controlled way to ask “what if?”</h2><p>Event Horizon models a fictional single-asset market. Each experiment feeds ordered commands into a C++ exchange, clearing and settlement engine. The dashboard shows what that engine actually produced.</p><div class="dialog-grid"><div><strong>What the numbers mean</strong><p>Prices are in integer cents. Matched trades reserve cash and shares; settlement delivers them. Funds in clearing cannot be used again until delivered.</p></div><div><strong>What they don’t mean</strong><p>This is not real market data, an empirically calibrated risk model, or a production trading system. It is a reproducible way to study failure paths.</p></div></div><button type="button" id="about-ok" class="button button-primary">Back to the lab</button></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

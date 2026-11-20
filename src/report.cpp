@@ -171,7 +171,23 @@ std::string to_json(const Simulation& s, std::string_view scenario_id) {
             << ",\"clearing_cash_cents\":" << ev.clearing_cash_cents
             << ",\"pending_trades\":" << ev.pending_trades
             << ",\"trades_executed\":" << ev.trades_executed
-            << ",\"trades_settled\":" << ev.trades_settled << '}';
+            << ",\"trades_settled\":" << ev.trades_settled
+            << ",\"rejected_orders\":" << ev.rejected_orders
+            << ",\"exchange_online\":" << bool_json(ev.exchange_online)
+            << ",\"payments_online\":" << bool_json(ev.payments_online)
+            << ",\"accounts\":[";
+        bool first_account = true;
+        for (const auto& account : ev.accounts) {
+            if (!first_account) out << ',';
+            first_account = false;
+            out << "{\"name\":" << json_escape(account.name)
+                << ",\"cash_cents\":" << account.cash_cents
+                << ",\"available_cash_cents\":" << account.available_cash_cents()
+                << ",\"reserved_cash_cents\":" << account.reserved_cash_cents
+                << ",\"shares\":" << account.shares
+                << ",\"available_shares\":" << account.available_shares() << '}';
+        }
+        out << "]}";
     }
     out << "]}";
     return out.str();

@@ -1,10 +1,13 @@
 #include "event_horizon/report.hpp"
+#include "event_horizon/resilience.hpp"
 
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <csignal>
 #include <deque>
 #include <fstream>
@@ -24,6 +27,24 @@ using tcp = net::ip::tcp;
 namespace eh = event_horizon;
 
 namespace {
+
+struct RequestStats {
+    std::atomic<std::uint64_t> total{0};
+    std::atomic<std::uint64_t> client_errors{0};
+    std::atomic<std::uint64_t> server_errors{0};
+    std::atomic<std::uint64_t> in_flight{0};
+    const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+};
+
+std::string stats_json(const RequestStats& stats) {
+    const auto uptime = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - stats.started).count();
+    return "{\"uptime_seconds\":" + std::to_string(uptime)
+        + ",\"requests_total\":" + std::to_string(stats.total.load())
+        + ",\"client_errors_total\":" + std::to_string(stats.client_errors.load())
+        + ",\"server_errors_total\":" + std::to_string(stats.server_errors.load())
+        + ",\"in_flight\":" + std::to_string(stats.in_flight.load()) + "}";
+}
 
 struct Configuration {
     std::string host = "127.0.0.1";
@@ -50,6 +71,27 @@ int number(const std::string& s, int low, int high) {
         throw std::invalid_argument("numeric option outside allowed range: " + s);
     }
     return value;
+}
+
+// Only accept a two-field, integer-only query string. No general-purpose
+// URL decoder is needed for these bounded, numeric experiment parameters.
+std::pair<int, int> resilience_params(const std::string& path) {
+    constexpr std::string_view prefix = "/api/resilience/case?";
+    if (!path.starts_with(prefix)) throw std::invalid_argument("expected recovery and funding parameters");
+    const auto query = path.substr(prefix.size());
+    const auto separator = query.find('&');
+    if (separator == std::string::npos || separator != query.rfind('&')) {
+        throw std::invalid_argument("expected recovery and funding parameters");
+    }
+    const auto first = query.substr(0, separator);
+    const auto second = query.substr(separator + 1);
+    constexpr std::string_view recovery_key = "recovery=";
+    constexpr std::string_view funding_key = "funding=";
+    if (!first.starts_with(recovery_key) || !second.starts_with(funding_key)) {
+        throw std::invalid_argument("expected recovery and funding parameters");
+    }
+    return {number(first.substr(recovery_key.size()), 0, 3),
+            number(second.substr(funding_key.size()), 0, 2)};
 }
 
 Configuration parse_args(int argc, char** argv) {
@@ -91,11 +133,22 @@ http::response<http::string_body> error_response(http::status code, const std::s
 }
 
 http::response<http::string_body> route(const http::request<http::string_body>& req,
-                                        const Configuration& config) {
+                                        const Configuration& config, const RequestStats& stats) {
     const std::string path(req.target());
     if (req.method() == http::verb::get) {
         if (path == "/api/health") return response(http::status::ok,
-            "{\"status\":\"ok\",\"service\":\"event-horizon\",\"version\":\"1.0.0\"}");
+            "{\"status\":\"ok\",\"service\":\"event-horizon\",\"version\":\"2.0.0\"}");
+        if (path == "/api/metrics") return response(http::status::ok, stats_json(stats));
+        if (path == "/api/resilience") return response(http::status::ok, eh::resilience_matrix_json());
+        if (path == "/api/resilience/case" || path.starts_with("/api/resilience/case?")) {
+            try {
+                const auto [recovery, funding] = resilience_params(path);
+                return response(http::status::ok, eh::to_json(
+                    eh::run_resilience_case(recovery, funding), "resilience"));
+            } catch (const std::invalid_argument& e) {
+                return error_response(http::status::bad_request, e.what());
+            }
+        }
         if (path == "/api/scenarios") return response(http::status::ok, eh::catalog_json());
         if (path == "/api/compare") return response(http::status::ok,
             eh::comparison_json(config.data_directory));
@@ -115,6 +168,10 @@ http::response<http::string_body> route(const http::request<http::string_body>& 
         }
         if (path == "/app.js") {
             return response(http::status::ok, read_file(config.web_directory + "/app.js"),
+                            "text/javascript; charset=utf-8");
+        }
+        if (path == "/insights.mjs") {
+            return response(http::status::ok, read_file(config.web_directory + "/insights.mjs"),
                             "text/javascript; charset=utf-8");
         }
         if (path == "/style.css") {
@@ -143,7 +200,7 @@ http::response<http::string_body> route(const http::request<http::string_body>& 
     return error_response(http::status::method_not_allowed, "method not allowed");
 }
 
-void handle_connection(beast::tcp_stream& stream, const Configuration& config) {
+void handle_connection(beast::tcp_stream& stream, const Configuration& config, RequestStats& stats) {
     stream.expires_after(std::chrono::seconds(5));
     beast::flat_buffer buffer;
     http::request_parser<http::string_body> parser;
@@ -158,16 +215,22 @@ void handle_connection(beast::tcp_stream& stream, const Configuration& config) {
         }
         return;
     }
+    stats.in_flight.fetch_add(1);
     http::response<http::string_body> out;
     try {
-        out = route(parser.release(), config);
+        out = route(parser.release(), config, stats);
     } catch (const std::exception& e) {
         // Path and system errors are not printed into the response.
         std::cerr << "server request failed: " << e.what() << '\n';
         out = error_response(http::status::internal_server_error, "internal server error");
     }
+    stats.total.fetch_add(1);
+    const auto status = out.result_int();
+    if (status >= 400 && status < 500) stats.client_errors.fetch_add(1);
+    if (status >= 500) stats.server_errors.fetch_add(1);
     stream.expires_after(std::chrono::seconds(10));
     http::write(stream, out, ec);
+    stats.in_flight.fetch_sub(1);
     stream.socket().shutdown(tcp::socket::shutdown_both, ec);
 }
 
@@ -219,12 +282,13 @@ int main(int argc, char** argv) {
         acceptor.bind(tcp::endpoint(address, config.port));
         acceptor.listen(net::socket_base::max_listen_connections);
         WorkerQueue queue;
+        RequestStats stats;
         std::vector<std::thread> workers;
         for (int i = 0; i < config.workers; ++i) {
-            workers.emplace_back([&queue, &config] {
+            workers.emplace_back([&queue, &config, &stats] {
                 while (true) {
                     auto stream = queue.take();
-                    try { handle_connection(*stream, config); }
+                    try { handle_connection(*stream, config, stats); }
                     catch (const std::exception& e) {
                         std::cerr << "connection failed: " << e.what() << '\n';
                     }

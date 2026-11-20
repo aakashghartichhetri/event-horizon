@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(event_horizon VERSION 1.0.0 LANGUAGES CXX)
+project(event_horizon VERSION 2.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,7 +19,7 @@ if(EH_ENABLE_SANITIZERS)
 endif()
 
 add_library(event_horizon_lib
-    src/exchange.cpp src/replay.cpp src/report.cpp)
+    src/exchange.cpp src/replay.cpp src/report.cpp src/resilience.cpp)
 target_include_directories(event_horizon_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(event_horizon_lib PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
@@ -60,7 +60,15 @@ if(EH_BUILD_TESTS)
     add_test(NAME benchmark_smoke COMMAND event_horizon_cli benchmark 100)
     set_tests_properties(benchmark_smoke PROPERTIES WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     add_test(NAME scenarios_json_smoke COMMAND event_horizon_cli compare-json)
+    add_test(NAME resilience_json_smoke COMMAND event_horizon_cli resilience-json)
     set_tests_properties(scenarios_json_smoke PROPERTIES WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    find_program(EH_NODE_EXECUTABLE node)
+    if(EH_NODE_EXECUTABLE)
+        add_test(NAME dashboard_syntax COMMAND ${EH_NODE_EXECUTABLE} --check
+            ${PROJECT_SOURCE_DIR}/web/app.js)
+        add_test(NAME dashboard_analysis COMMAND ${EH_NODE_EXECUTABLE} --test
+            ${PROJECT_SOURCE_DIR}/web/insights.test.mjs)
+    endif()
     if(EH_BUILD_SERVER)
         find_package(Python3 COMPONENTS Interpreter REQUIRED)
         add_test(NAME http_integration COMMAND ${Python3_EXECUTABLE}

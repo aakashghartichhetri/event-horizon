@@ -1,4 +1,5 @@
 #include "event_horizon/report.hpp"
+#include "event_horizon/resilience.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -189,6 +190,75 @@ void test_parallel_replays_independent() {
     for (const bool result : results) require(result, "parallel replay changed output");
 }
 
+
+void test_recovery_matrix_and_snapshots() {
+    const auto baseline = eh::run_scenario("data", "baseline");
+    const auto initial_cash = baseline.exchange.initial_cash_cents();
+    const auto initial_shares = baseline.exchange.initial_shares();
+    for (int recovery = 0; recovery < 4; ++recovery) {
+        for (int funding = 0; funding < 3; ++funding) {
+            const auto simulation = eh::run_resilience_case(recovery, funding);
+            const auto& e = simulation.exchange;
+            e.verify_invariants();
+            require(e.initial_cash_cents() == initial_cash, "stress cases start with same cash");
+            require(e.initial_shares() == initial_shares, "stress cases start with same shares");
+            require(!simulation.timeline.empty(), "stress case must have events");
+            require(simulation.timeline.back().accounts.size() == e.accounts().size(),
+                    "final snapshot must contain all accounts");
+            if (recovery == 0) {
+                require(e.metrics().trades_settled == 3, "early recovery settles three trades");
+                require(e.metrics().rejected_orders == 0, "early recovery prevents rejects");
+            }
+            if (recovery == 2 && funding == 0) {
+                require(e.metrics().trades_executed == 1, "unfunded late recovery has cascade");
+                require(e.metrics().rejected_orders == 2, "unfunded late recovery rejects two orders");
+            }
+            if (recovery == 2 && funding == 2) {
+                require(e.metrics().trades_settled == 3, "fully funded late recovery settles all");
+                require(e.metrics().rejected_orders == 0, "full facility prevents rejects");
+                for (const auto& [name, cents] : e.outstanding_loans()) {
+                    require(cents == 0, "funded late recovery must repay " + name);
+                }
+            }
+            if (recovery == 3) {
+                require(e.metrics().trades_settled == 0, "permanent outage cannot settle");
+                require(e.metrics().trades_executed == funding + 1,
+                        "loans support one extra matched trade per funded participant");
+            }
+        }
+    }
+    require(eh::resilience_matrix_json() == eh::resilience_matrix_json(),
+            "controlled matrix is deterministic");
+    try {
+        (void)eh::run_resilience_case(9, 0);
+        throw std::runtime_error("invalid recovery stage must be rejected");
+    } catch (const std::invalid_argument&) { }
+
+    const auto recovered = eh::run_scenario("data", "recovery");
+    bool saw_before = false, saw_after = false;
+    for (const auto& event : recovered.timeline) {
+        if (event.command == "PAYMENTS_DOWN") {
+            require(account(recovered.exchange, "BEACON").cash_cents == 9000,
+                    "final recovery position unchanged");
+            for (const auto& entry : event.accounts) {
+                if (entry.name == "BEACON") {
+                    saw_before = entry.available_cash_cents() == 5000;
+                }
+            }
+        }
+        if (event.command == "SETTLE" && event.trades_settled == 1) {
+            for (const auto& entry : event.accounts) {
+                if (entry.name == "BEACON") {
+                    saw_after = entry.available_cash_cents() == 45000;
+                }
+            }
+        }
+    }
+    require(saw_before && saw_after, "event snapshots must preserve historical funding");
+    const auto json = eh::to_json(recovered, "recovery");
+    require(json.find("\"accounts\":[") != std::string::npos,
+            "historical snapshots must be serialized");
+}
 }  // namespace
 
 void register_system_tests(std::vector<std::pair<std::string, std::function<void()>>>& tests) {
@@ -204,5 +274,6 @@ void register_system_tests(std::vector<std::pair<std::string, std::function<void
         {"strict input parsing", test_strict_errors_and_size_limits},
         {"randomized conservation (40 x 100)", test_randomized_accounting_invariants},
         {"parallel independent scenarios", test_parallel_replays_independent},
+        {"resilience matrix and historical balances", test_recovery_matrix_and_snapshots},
     });
 }

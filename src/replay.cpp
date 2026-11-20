@@ -219,7 +219,9 @@ void replay_events(std::istream& input, Exchange& exchange, std::ostream& log,
             if (trace != nullptr) {
                 trace->push_back({events, line_number, trimmed, outcome.status, outcome.message,
                     exchange.clearing_cash_cents(), exchange.pending_trade_count(),
-                    exchange.metrics().trades_executed, exchange.metrics().trades_settled});
+                    exchange.metrics().trades_executed, exchange.metrics().trades_settled,
+                    exchange.metrics().rejected_orders, exchange.exchange_online(),
+                    exchange.payments_online(), exchange.accounts()});
             }
         } catch (const std::exception& error) {
             throw std::runtime_error("line " + std::to_string(line_number) + ": " + error.what());

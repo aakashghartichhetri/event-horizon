@@ -19,6 +19,10 @@ struct EventRecord {
     std::size_t pending_trades;
     std::int64_t trades_executed;
     std::int64_t trades_settled;
+    std::int64_t rejected_orders;
+    bool exchange_online;
+    bool payments_online;
+    std::vector<AccountView> accounts; // True post-event positions for replay, not final balances.
 };
 
 // Strict, unquoted CSV: all dollar values use integer cents.

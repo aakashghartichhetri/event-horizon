@@ -1,6 +1,7 @@
 #include "event_horizon/exchange.hpp"
 #include "event_horizon/replay.hpp"
 #include "event_horizon/report.hpp"
+#include "event_horizon/resilience.hpp"
 
 #include <chrono>
 #include <charconv>
@@ -26,6 +27,8 @@ void usage(std::ostream& out) {
         << "  event-horizon scenario <name>      Replay a built-in experiment\n"
         << "  event-horizon scenario-json <name> Export a built-in experiment as JSON\n"
         << "  event-horizon compare-json         Output comparison JSON\n"
+        << "  event-horizon resilience-json      Run all 12 controlled recovery cases\n"
+        << "  event-horizon resilience-case R F  Replay one case (R=0..3, F=0..2)\n"
         << "  event-horizon help                 Show this help\n\n"
         << "Run 'demo' from the project root so data/*.csv can be found.\n";
 }
@@ -65,6 +68,17 @@ int demo() {
                  "cash to buy from CIRRUS; CIRRUS cannot buy from DELTA. "
                  "Restoring payments and settling before the next order breaks the chain.\n";
     return 0;
+}
+
+int parse_case_argument(const char* raw, int min, int max) {
+    const std::string value = raw;
+    int number = 0;
+    const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), number);
+    if (error != std::errc{} || end != value.data() + value.size() ||
+        number < min || number > max) {
+        throw std::invalid_argument("resilience coordinate outside supported range");
+    }
+    return number;
 }
 
 int benchmark(int argc, char** argv) {
@@ -138,6 +152,16 @@ int main(int argc, char** argv) {
         }
         if (argc == 2 && std::string(argv[1]) == "compare-json") {
             std::cout << eh::comparison_json("data") << '\n';
+            return 0;
+        }
+        if (argc == 2 && std::string(argv[1]) == "resilience-json") {
+            std::cout << eh::resilience_matrix_json() << '\n';
+            return 0;
+        }
+        if (argc == 4 && std::string(argv[1]) == "resilience-case") {
+            const auto recovery = parse_case_argument(argv[2], 0, 3);
+            const auto funding = parse_case_argument(argv[3], 0, 2);
+            std::cout << eh::to_json(eh::run_resilience_case(recovery, funding), "resilience") << '\n';
             return 0;
         }
         if (argc >= 2 && std::string(argv[1]) == "benchmark") return benchmark(argc, argv);
