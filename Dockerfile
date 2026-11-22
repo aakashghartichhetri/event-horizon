@@ -12,7 +12,7 @@ COPY src ./src
 # the manifest during the same build; this also avoids clock-skew rebuild loops.
 RUN cmake -S . -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_SUPPRESS_REGENERATION=ON \
-      -DEH_BUILD_TESTS=OFF -DEH_WITH_GTEST=OFF \
+      -DEH_BUILD_TESTS=OFF -DEH_WITH_GTEST=OFF -DEH_BUILD_BENCHMARKS=OFF \
     && cmake --build /build -j 2
 
 FROM ubuntu:24.04

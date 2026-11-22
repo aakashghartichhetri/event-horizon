@@ -241,6 +241,72 @@ void test_order_id_cannot_be_reused_after_cancel() {
     exchange.verify_invariants();
 }
 
+void test_unreachable_self_trade_does_not_reject() {
+    eh::Exchange e;
+    check(e.add_account("BUYER", 2000, 1).ok, "buyer account");
+    check(e.add_account("SELLER", 0, 1).ok, "seller account");
+    check(e.place_order("cheap", "SELLER", eh::Side::sell, 1, 90).ok, "first ask");
+    check(e.place_order("own", "BUYER", eh::Side::sell, 1, 100).ok, "own worse ask");
+    check(e.place_order("bid", "BUYER", eh::Side::buy, 1, 110).ok,
+          "fully filled before reaching own quote must be accepted");
+    check(e.trades().size() == 1 && e.trades()[0].seller == "SELLER",
+          "execution should use best eligible seller");
+    check(e.open_orders().size() == 1 && e.open_orders()[0].id == "own",
+          "worse own ask remains on book");
+    e.verify_invariants();
+}
+
+void test_unreachable_price_band_does_not_reject() {
+    eh::Exchange e;
+    check(e.add_account("BUYER", 2000, 0).ok, "buyer");
+    check(e.add_account("FIRST", 0, 1).ok, "first seller");
+    check(e.add_account("SECOND", 0, 1).ok, "second seller");
+    check(e.set_price_band(100, 1000).ok, "10 percent fixed band");
+    check(e.place_order("in-band", "FIRST", eh::Side::sell, 1, 100).ok, "first ask");
+    check(e.place_order("out-band", "SECOND", eh::Side::sell, 1, 120).ok, "second ask");
+    check(e.place_order("bid", "BUYER", eh::Side::buy, 1, 120).ok,
+          "better in-band fill should not see unreachable out-of-band ask");
+    check(e.trades().size() == 1 && e.trades()[0].price_cents == 100,
+          "only the in-band trade should execute");
+    e.verify_invariants();
+}
+
+void test_multifill_rejection_is_atomic() {
+    eh::Exchange e;
+    check(e.add_account("BUYER", 3000, 0).ok, "buyer");
+    check(e.add_account("SELLER", 0, 1).ok, "seller");
+    check(e.add_account("OWN", 0, 1).ok, "second seller");
+    check(e.place_order("one", "SELLER", eh::Side::sell, 1, 100).ok, "first ask");
+    check(e.place_order("two", "OWN", eh::Side::sell, 1, 120).ok, "second ask");
+    check(e.set_price_band(100, 1000).ok, "set band");
+    check(!e.place_order("buy", "BUYER", eh::Side::buy, 2, 120).ok,
+          "second out-of-band fill must reject whole order");
+    check(e.trades().empty(), "no partial trade should escape rejected incoming order");
+    check(e.open_orders().size() == 2, "book stays unchanged");
+    check(find_account(e.accounts(), "BUYER").reserved_cash_cents == 0,
+          "rejected bid cannot reserve cash");
+    e.verify_invariants();
+}
+
+void test_trades_limit_covers_all_fills() {
+    eh::Exchange e;
+    check(e.add_account("B", 2'000'000, 0).ok, "buyer");
+    check(e.add_account("S", 0, 10'001).ok, "seller");
+    for (int i = 0; i < 9'999; ++i) {
+        check(e.place_order("s" + std::to_string(i), "S", eh::Side::sell, 1, 100).ok,
+              "resting sell");
+        check(e.place_order("b" + std::to_string(i), "B", eh::Side::buy, 1, 100).ok,
+              "matching buy");
+    }
+    check(e.place_order("last1", "S", eh::Side::sell, 1, 100).ok, "first pending ask");
+    check(e.place_order("last2", "S", eh::Side::sell, 1, 100).ok, "second pending ask");
+    check(!e.place_order("over", "B", eh::Side::buy, 2, 100).ok,
+          "one order cannot exceed trade-history cap with multiple fills");
+    check(e.trades().size() == 9'999, "trade count cannot overshoot cap");
+    check(e.open_orders().size() == 2, "rejected order leaves remaining asks");
+    e.verify_invariants();
+}
+
 }  // namespace
 
 void register_system_tests(std::vector<std::pair<std::string, std::function<void()>>>& tests);
@@ -260,6 +326,10 @@ int main() {
         {"line errors", test_replay_errors_have_line_numbers},
         {"deterministic replay", test_replay_is_deterministic},
         {"unique order IDs", test_order_id_cannot_be_reused_after_cancel},
+        {"unreachable self-trade", test_unreachable_self_trade_does_not_reject},
+        {"unreachable price band", test_unreachable_price_band_does_not_reject},
+        {"multi-fill admission atomicity", test_multifill_rejection_is_atomic},
+        {"trade-history limit on multi-fill", test_trades_limit_covers_all_fills},
     };
     register_system_tests(tests);
     int failures = 0;

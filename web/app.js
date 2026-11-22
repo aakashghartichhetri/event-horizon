@@ -1,5 +1,5 @@
 import {
-  STORIES, money, integer, shortCommand, eventMeaning, snapshotAt,
+  STORIES, money, centsInteger, integer, shortCommand, eventMeaning, snapshotAt,
   eventPoints, classification, fileSafeName, buildTradeCsv, resilienceOutcome,
 } from './insights.mjs';
 
@@ -45,10 +45,7 @@ function toast(message) {
   window.clearTimeout(toastTimeout);
   toastTimeout = window.setTimeout(() => { $('toast').hidden = true; }, 3400);
 }
-function setConnection(online) {
-  $('connection-badge').classList.toggle('offline', !online);
-  text('connection-label', online ? 'Engine connected' : 'Engine unavailable');
-}
+
 async function api(path, options) {
   const response = await fetch(path, { cache: 'no-store', ...options });
   let body;
@@ -134,14 +131,12 @@ async function loadScenario(id) {
     if (generation !== model.loadGeneration) return;
     displaySimulation(simulation, id, { updateEditor: true });
     setView('overview');
-    setConnection(true);
     const url = new URL(location.href);
     url.searchParams.delete('resilience');
     url.searchParams.set('scenario', id);
     window.history.replaceState({}, '', url.pathname + url.search);
   } catch (error) {
     if (generation !== model.loadGeneration) return;
-    setConnection(false);
     displayError(`Could not load this experiment: ${error.message}`);
   }
 }
@@ -242,13 +237,15 @@ function renderInspector(current) {
   history.append(title, select, value);
   const samples = model.current.timeline.slice(0, current.step)
     .map(ev => ev.accounts?.find(a => a.name === select.value)?.available_cash_cents)
-    .filter(n => typeof n === 'number');
+    .filter(n => n !== undefined && n !== null);
   if (samples.length > 1) {
     const chart = svg('svg', { class: 'history-sparkline', viewBox: '0 0 250 62', role: 'img',
       'aria-label': `${select.value} available cash across ${samples.length} events` });
-    const low = Math.min(...samples), high = Math.max(...samples);
-    const range = Math.max(1, high - low);
-    const points = samples.map((v, i) => `${8 + (234 * i / (samples.length - 1))},${52 - 42 * (v - low) / range}`).join(' ');
+    const exact = samples.map(centsInteger);
+    const low = exact.reduce((a, b) => a < b ? a : b);
+    const high = exact.reduce((a, b) => a > b ? a : b);
+    const range = high > low ? high - low : 1n;
+    const points = exact.map((v, i) => `${8 + (234 * i / (exact.length - 1))},${52 - 42 * Number((v - low) * 10000n / range) / 10000}`).join(' ');
     chart.append(svg('line', { x1: 7, y1: 53, x2: 243, y2: 53, class: 'history-axis' }));
     chart.append(svg('polyline', { points, class: 'history-line' }));
     history.append(chart);
@@ -279,10 +276,13 @@ function renderPressureChart(current) {
   const shown = eventPoints(model.current, current.step);
   const width = 690, height = 234, left = 57, right = 18, top = 21, bottom = 34;
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
-  const maxValue = Math.max(100, ...all.map(point => point.clearingCash));
+  const maxValue = all.reduce((maximum, point) => {
+    const amount = centsInteger(point.clearingCash);
+    return amount > maximum ? amount : maximum;
+  }, 100n);
   const total = Math.max(1, model.current.timeline.length);
   const x = step => left + (step / total) * plotWidth;
-  const y = amount => top + plotHeight * (1 - amount / maxValue);
+  const y = amount => top + plotHeight * (1 - Number(centsInteger(amount) * 10000n / maxValue) / 10000);
   const path = points => points.map((point, index) => `${index ? 'L' : 'M'} ${x(point.index).toFixed(2)} ${y(point.clearingCash).toFixed(2)}`).join(' ');
   const picture = svg('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': 'Cash waiting in clearing by replay event' });
   const defs = svg('defs');
@@ -291,7 +291,7 @@ function renderPressureChart(current) {
   gradient.append(svg('stop', { offset: '100%', 'stop-color': '#61d7bd', 'stop-opacity': '0' }));
   defs.append(gradient); picture.append(defs);
   for (let row = 0; row <= 4; row++) {
-    const amount = Math.round(maxValue * row / 4);
+    const amount = maxValue * BigInt(row) / 4n;
     const lineY = y(amount);
     picture.append(svg('line', { x1: left, y1: lineY, x2: width - right, y2: lineY,
       stroke: '#2b3d50', 'stroke-dasharray': '4 6' }));
@@ -360,7 +360,7 @@ function graph(container, filter, large = false) {
     const angle = -Math.PI / 2 + 2 * Math.PI * index / Math.max(1, nodes.length);
     positions.set(account.name, { x: centerX + Math.cos(angle) * rx, y: centerY + Math.sin(angle) * ry });
   });
-  const canvas = svg('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img',
+  const canvas = svg('svg', { viewBox: `0 0 ${width} ${height}`, role: large ? 'group' : 'img',
     'aria-label': 'Network of simulated participants connected by executed trades' });
   const defs = svg('defs');
   for (const [name, color] of [['settled', '#61d7bd'], ['pending', '#f6ae6c']]) {
@@ -395,14 +395,24 @@ function graph(container, filter, large = false) {
     const isSelected = large && account.name === model.selectedParticipant;
     const hasPending = pending.has(account.name);
     const nodeColor = hasPending ? '#f6ae6c' : participants.has(account.name) ? '#61d7bd' : '#60768d';
-    const group = svg('g', { tabindex: large ? 0 : -1, role: 'button', 'aria-label': `Inspect ${account.name}`, class: 'network-node' });
+    const group = svg('g', { tabindex: large ? 0 : -1, role: 'button',
+      'data-participant': account.name, 'aria-pressed': String(isSelected),
+      'aria-label': `Inspect ${account.name}`, class: 'network-node' });
     if (isSelected) group.append(svg('circle', { cx: pos.x, cy: pos.y, r: 44, fill: '#61d7bd', opacity: '.12' }));
     group.append(svg('circle', { cx: pos.x, cy: pos.y, r: 35, fill: '#183040', stroke: nodeColor, 'stroke-width': isSelected ? 3.6 : 2.2 }));
     const label = svg('text', { x: pos.x, y: pos.y + 4, 'text-anchor': 'middle', fill: '#effcfb',
       'font-size': account.name.length >= 8 ? 11 : 12, 'font-weight': 700 });
     label.textContent = account.name;
     group.append(label);
-    const select = () => { model.selectedParticipant = account.name; renderParticipantDetail(); graph('network-full', model.networkFilter, true); };
+    const select = () => {
+      model.selectedParticipant = account.name;
+      renderParticipantDetail();
+      graph('network-full', model.networkFilter, true);
+      // Re-rendering the SVG replaces the focused node. Restore keyboard focus.
+      const selected = Array.from($('network-full').querySelectorAll('[data-participant]'))
+        .find(item => item.getAttribute('data-participant') === account.name);
+      selected?.focus({ preventScroll: true });
+    };
     group.addEventListener('click', select);
     group.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(); }
@@ -455,7 +465,7 @@ function renderLedger() {
   text('ledger-notional', money(data.metrics.traded_notional_cents));
   text('ledger-settled', integer(data.metrics.trades_settled));
   text('ledger-cash', money(data.metrics.clearing_cash_cents));
-  text('ledger-loans', money(data.loans.reduce((sum, loan) => sum + loan.outstanding_cents, 0)));
+  text('ledger-loans', money(data.loans.reduce((sum, loan) => sum + centsInteger(loan.outstanding_cents), 0n)));
   const filter = $('trade-filter').value;
   const body = $('trades-table'); body.replaceChildren();
   const trades = data.trades.filter(trade => filter === 'all' || (filter === 'settled' ? trade.settled : !trade.settled));
@@ -497,20 +507,20 @@ function renderComparison() {
   const chart = $('comparison-chart'); chart.replaceChildren();
   for (const [title, key, currency] of metrics) {
     const format = value => currency ? money(value) : integer(value);
-    const diff = b[key] - a[key];
+    const diff = currency ? centsInteger(b[key]) - centsInteger(a[key]) : b[key] - a[key];
     const row = element('tr');
-    for (const value of [title, format(a[key]), format(b[key]), `${diff > 0 ? '+' : diff < 0 ? '−' : ''}${format(Math.abs(diff))}`]) {
+    for (const value of [title, format(a[key]), format(b[key]), `${diff > 0 ? '+' : diff < 0 ? '−' : ''}${format(currency ? (diff < 0n ? -diff : diff) : Math.abs(diff))}`]) {
       row.append(element('td', '', value));
     }
     body.append(row);
     if (['settled', 'rejected', 'escrow_cents'].includes(key)) {
       const group = element('div', 'compare-group'); group.append(element('span', 'compare-group-label', title));
       const bars = element('div', 'compare-bars');
-      const max = Math.max(1, a[key], b[key]);
+      const max = currency ? [1n, centsInteger(a[key]), centsInteger(b[key])].reduce((x,y) => x > y ? x : y) : Math.max(1, a[key], b[key]);
       for (const [value, second] of [[a[key], false], [b[key], true]]) {
         const line = element('div', second ? 'compare-bar second' : 'compare-bar');
         const track = element('div', 'compare-track');
-        const bar = element('i'); bar.style.width = `${(value / max) * 100}%`;
+        const bar = element('i'); bar.style.width = `${currency ? Number(centsInteger(value) * 10000n / max) / 100 : (value / max) * 100}%`;
         track.append(bar); line.append(track, element('span', '', format(value))); bars.append(line);
       }
       group.append(bars); chart.append(group);
@@ -542,7 +552,6 @@ async function ensureResilience() {
     renderResilience();
   } catch (error) {
     $('resilience-stats').replaceChildren(element('p', 'resilience-error', `Could not load the resilience matrix: ${error.message}`));
-    setConnection(false);
   }
 }
 function renderResilience() {
@@ -622,7 +631,6 @@ async function loadResilienceCase(recovery, funding) {
     model.resilienceContext = { recovery, funding };
     displaySimulation(simulation, 'resilience', { updateEditor: true });
     setView('overview');
-    setConnection(true);
     const url = new URL(location.href);
     url.searchParams.delete('scenario');
     url.searchParams.set('resilience', `${recovery}-${funding}`);
@@ -651,7 +659,6 @@ async function runCustom() {
     root.append(element('strong', '', 'Experiment completed.'),
       element('p', '', `${data.metrics.trades_executed} matched trades, ${data.metrics.trades_settled} settled, ${data.metrics.rejected_orders} rejected orders. All accounting checks passed.`));
     setView('overview');
-    setConnection(true);
     toast('Your experiment ran in a fresh, isolated C++ simulation.');
   } catch (error) {
     displayError(`Experiment rejected: ${error.message}`);
@@ -722,7 +729,11 @@ function setUpEvents() {
   $('playback-rate').addEventListener('change', () => { if (model.running) { stopPlayback(); startPlayback(); } });
   $('network-filter').querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
     model.networkFilter = button.dataset.filter;
-    $('network-filter').querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+    $('network-filter').querySelectorAll('button').forEach(item => {
+      const active = item === button;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-pressed', String(active));
+    });
     graph('network-full', model.networkFilter, true);
   }));
   $('trade-filter').addEventListener('change', () => { if (model.current) renderLedger(); });
@@ -782,7 +793,6 @@ async function initialize() {
       await loadScenario(valid ? requested : first);
     }
   } catch (error) {
-    setConnection(false);
     displayError(`Couldn't connect to the C++ engine: ${error.message}. Start the server and refresh this page.`);
   }
 }
