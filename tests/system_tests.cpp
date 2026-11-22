@@ -1,7 +1,10 @@
 #include "event_horizon/report.hpp"
 #include "event_horizon/resilience.hpp"
 
+#include <algorithm>
 #include <cstdint>
+#include <map>
+#include <limits>
 #include <functional>
 #include <random>
 #include <sstream>
@@ -259,6 +262,204 @@ void test_recovery_matrix_and_snapshots() {
     require(json.find("\"accounts\":[") != std::string::npos,
             "historical snapshots must be serialized");
 }
+void test_failed_loan_operations_do_not_change_ledger() {
+    eh::Exchange e;
+    require(e.add_account("FACILITY", 1000, 0).ok, "funded facility");
+    require(e.add_account("A", 100, 0).ok, "borrower");
+    require(!e.repay("A", 1).ok, "repayment without debt rejected");
+    require(!e.lend("A", 2000).ok, "loan exceeds available facility cash");
+    require(e.outstanding_loans().empty(), "rejected lending or repayment cannot write debt");
+    require(e.lend("A", 500).ok, "valid loan");
+    require(!e.repay("A", 501).ok, "over-repayment rejected");
+    require(e.outstanding_loans().at("A") == 500, "rejected repayment leaves debt unchanged");
+    require(e.repay("A", 500).ok, "principal repaid");
+    require(e.outstanding_loans().empty(), "fully repaid debt is closed");
+    e.verify_invariants();
+}
+
+void test_integer_boundaries_and_escrow_round_trip() {
+    eh::Exchange e;
+    require(e.add_account("B", 100'000'000'000'000LL, 0).ok, "max supported buyer");
+    require(e.add_account("S", 0, 1'000'000).ok, "seller shares");
+    require(e.place_order("s", "S", eh::Side::sell, 1'000'000, 100'000'000).ok,
+            "maximum quantity and price");
+    require(e.place_order("b", "B", eh::Side::buy, 1'000'000, 100'000'000).ok,
+            "exact-limit notional accepted");
+    require(e.clearing_cash_cents() == 100'000'000'000'000LL, "cash fully in escrow");
+    e.set_payments_online(false);
+    require(e.settle_all().blocked, "outage must leave full escrow unchanged");
+    e.verify_invariants();
+    e.set_payments_online(true);
+    require(e.settle_all().settled == 1, "full escrow settled");
+    require(e.accounts().at(1).cash_cents == 100'000'000'000'000LL,
+            "seller cash reaches exact upper boundary");
+    require(!e.add_account("X", std::numeric_limits<std::int64_t>::max(), 0).ok,
+            "over-limit starting cash is rejected");
+    e.verify_invariants();
+}
+
+// A small independent price-time reference model, deliberately separate from
+// Exchange's implementation. Every seed is printed on failure for replay.
+void test_seeded_reference_matching() {
+    struct ReferenceOrder {
+        std::string id;
+        std::string owner;
+        eh::Side side;
+        std::int64_t remaining;
+        std::int64_t price;
+        int sequence;
+    };
+    struct ReferenceTrade {
+        std::string buyer;
+        std::string seller;
+        std::int64_t quantity;
+        std::int64_t price;
+    };
+    const std::vector<std::string> people = {"A", "B", "C", "D"};
+    for (unsigned seed = 0; seed < 20; ++seed) {
+        std::mt19937 rng(20261121 + seed);
+        eh::Exchange exchange;
+        for (const auto& name : people) {
+            require(exchange.add_account(name, 1'000'000'000, 100'000).ok, "account setup");
+        }
+        std::vector<ReferenceOrder> reference;
+        std::vector<ReferenceTrade> trades;
+        for (int step = 0; step < 160; ++step) {
+            const auto context = "seed " + std::to_string(seed) + " step " + std::to_string(step);
+            if (!reference.empty() && rng() % 9 == 0) {
+                const auto index = static_cast<std::size_t>(rng() % reference.size());
+                require(exchange.cancel_order(reference[index].id, reference[index].owner).ok,
+                        context + ": cancellation failed");
+                reference.erase(reference.begin() + static_cast<std::ptrdiff_t>(index));
+            } else {
+                ReferenceOrder incoming{"r" + std::to_string(step), people[rng() % people.size()],
+                    rng() % 2 == 0 ? eh::Side::buy : eh::Side::sell,
+                    static_cast<std::int64_t>(rng() % 7 + 1),
+                    static_cast<std::int64_t>(rng() % 61 + 70), step};
+                const auto result = exchange.place_order(incoming.id, incoming.owner,
+                    incoming.side, incoming.remaining, incoming.price);
+                std::vector<std::size_t> candidates;
+                for (std::size_t i = 0; i < reference.size(); ++i) {
+                    const auto& r = reference[i];
+                    if (r.side == incoming.side) continue;
+                    if (incoming.side == eh::Side::buy ? incoming.price >= r.price
+                                                       : incoming.price <= r.price) {
+                        candidates.push_back(i);
+                    }
+                }
+                std::sort(candidates.begin(), candidates.end(), [&](std::size_t a, std::size_t b) {
+                    const auto& x = reference[a];
+                    const auto& y = reference[b];
+                    if (x.price != y.price) {
+                        return incoming.side == eh::Side::buy ? x.price < y.price : x.price > y.price;
+                    }
+                    return x.sequence < y.sequence;
+                });
+                std::int64_t remaining = incoming.remaining;
+                bool self_trade = false;
+                for (const auto index : candidates) {
+                    if (remaining == 0) break;
+                    if (reference[index].owner == incoming.owner) { self_trade = true; break; }
+                    remaining -= std::min(remaining, reference[index].remaining);
+                }
+                require(result.ok != self_trade, context + ": order admission disagreed with oracle");
+                if (!self_trade) {
+                    for (const auto index : candidates) {
+                        if (incoming.remaining == 0) break;
+                        auto& r = reference[index];
+                        const auto quantity = std::min(incoming.remaining, r.remaining);
+                        const auto buyer = incoming.side == eh::Side::buy ? incoming.owner : r.owner;
+                        const auto seller = incoming.side == eh::Side::sell ? incoming.owner : r.owner;
+                        trades.push_back({buyer, seller, quantity, r.price});
+                        incoming.remaining -= quantity;
+                        r.remaining -= quantity;
+                    }
+                    std::erase_if(reference, [](const auto& r) { return r.remaining == 0; });
+                    if (incoming.remaining > 0) reference.push_back(incoming);
+                }
+            }
+            const auto actual_trades = exchange.trades();
+            require(actual_trades.size() == trades.size(), context + ": trade count mismatch");
+            for (std::size_t i = 0; i < trades.size(); ++i) {
+                const auto& a = actual_trades[i];
+                const auto& b = trades[i];
+                require(a.buyer == b.buyer && a.seller == b.seller &&
+                        a.quantity == b.quantity && a.price_cents == b.price,
+                        context + ": reference fill mismatch at index " + std::to_string(i));
+            }
+            std::map<std::string, std::int64_t> expected;
+            for (const auto& order : reference) expected.emplace(order.id, order.remaining);
+            const auto active = exchange.open_orders();
+            require(active.size() == expected.size(), context + ": open order count differs");
+            for (const auto& order : active) {
+                require(expected.contains(order.id) && expected.at(order.id) == order.remaining,
+                        context + ": resting quantity differs");
+            }
+            if (step % 13 == 0) {
+                exchange.set_payments_online(step % 26 != 0);
+                (void)exchange.settle_batch(3);
+            }
+            exchange.verify_invariants();
+        }
+        exchange.set_payments_online(true);
+        exchange.settle_all();
+        exchange.verify_invariants();
+    }
+}
+
+
+void test_large_money_json_stays_exact() {
+    // Repeatedly circulate the same $1 trillion. Conservation bounds balances,
+    // but cumulative traded notional can grow beyond JS Number.MAX_SAFE_INTEGER.
+    std::ostringstream source;
+    source << "ACCOUNT,B,100000000000000,0\nACCOUNT,S,0,1000000\n";
+    for (int i = 0; i < 91; ++i) {
+        const auto seller = i % 2 == 0 ? "S" : "B";
+        const auto buyer = i % 2 == 0 ? "B" : "S";
+        source << "PLACE,s" << i << ',' << seller << ",SELL,1000000,100000000\n"
+               << "PLACE,b" << i << ',' << buyer << ",BUY,1000000,100000000\n"
+               << "SETTLE\n";
+    }
+    const auto simulation = eh::run_text(source.str());
+    simulation.exchange.verify_invariants();
+    require(simulation.exchange.metrics().traded_notional_cents == 9'100'000'000'000'000LL,
+            "large traded notional must remain exact");
+    const auto json = eh::to_json(simulation, "roundtrip");
+    require(json.find("\"traded_notional_cents\":\"9100000000000000\"") != std::string::npos,
+            "JSON must quote cents outside JS safe integer range");
+    require(json.find("\"cash_initial_cents\":100000000000000") != std::string::npos,
+            "safe cents should remain compatible numeric JSON");
+
+    std::ostringstream many;
+    for (int i = 0; i < 96; ++i) {
+        many << "ACCOUNT,F" << i << ",100000000000000,0\n";
+    }
+    const auto large_total = eh::to_json(eh::run_text(many.str()), "large_total");
+    require(large_total.find("\"cash_initial_cents\":\"9600000000000000\"") != std::string::npos,
+            "large starting aggregate must stay exact in JSON");
+}
+
+void test_multifill_book_reservations_after_settlement() {
+    eh::Exchange e;
+    require(e.add_account("BUYER", 1200, 0).ok, "buyer");
+    require(e.add_account("SELLER", 0, 3).ok, "seller");
+    require(e.place_order("ask1", "SELLER", eh::Side::sell, 1, 200).ok, "first ask");
+    require(e.place_order("ask2", "SELLER", eh::Side::sell, 2, 300).ok, "second ask");
+    require(e.place_order("buy", "BUYER", eh::Side::buy, 3, 350).ok, "three-share buy");
+    require(e.trades().size() == 2 && e.clearing_cash_cents() == 800,
+            "prepared multi-fill must preserve resting prices");
+    require(account(e, "BUYER").reserved_cash_cents == 0,
+            "fully filled order releases its entire limit reservation");
+    e.verify_invariants();
+    require(e.settle_batch(1).settled == 1, "first settlement");
+    require(e.clearing_cash_cents() == 600, "second trade remains escrowed");
+    e.verify_invariants();
+    require(e.settle_all().settled == 1, "second settlement");
+    require(account(e, "SELLER").cash_cents == 800, "seller receives exact total");
+    require(account(e, "BUYER").shares == 3, "buyer receives all shares");
+    e.verify_invariants();
+}
+
 }  // namespace
 
 void register_system_tests(std::vector<std::pair<std::string, std::function<void()>>>& tests) {
@@ -270,9 +471,14 @@ void register_system_tests(std::vector<std::pair<std::string, std::function<void
         {"batch settlement FIFO", test_batch_settlement_fifo},
         {"deterministic agent execution", test_agents_wait_for_cash},
         {"loans cannot spend reservations", test_loan_cannot_spend_reserved_cash},
+        {"rejected loans are side-effect free", test_failed_loan_operations_do_not_change_ledger},
+        {"integer and escrow boundaries", test_integer_boundaries_and_escrow_round_trip},
+        {"lossless large monetary JSON", test_large_money_json_stays_exact},
+        {"prepared multi-fill and split settlement", test_multifill_book_reservations_after_settlement},
         {"deterministic JSON escaping", test_json_is_reproducible_and_escaped},
         {"strict input parsing", test_strict_errors_and_size_limits},
         {"randomized conservation (40 x 100)", test_randomized_accounting_invariants},
+        {"seeded independent matcher (20 x 160)", test_seeded_reference_matching},
         {"parallel independent scenarios", test_parallel_replays_independent},
         {"resilience matrix and historical balances", test_recovery_matrix_and_snapshots},
     });

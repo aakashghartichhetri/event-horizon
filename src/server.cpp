@@ -9,6 +9,10 @@
 #include <condition_variable>
 #include <cstdint>
 #include <csignal>
+#include <cerrno>
+#include <poll.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 #include <deque>
 #include <fstream>
 #include <iostream>
@@ -28,6 +32,14 @@ namespace eh = event_horizon;
 
 namespace {
 
+// Lock-free atomic operations can be used in a signal handler on the supported
+// Linux/macOS targets. Unlike sig_atomic_t, this flag is also read by a different
+// thread when the signal is delivered to a worker.
+static_assert(std::atomic<bool>::is_always_lock_free);
+std::atomic<bool> shutdown_requested{false};
+
+void request_shutdown(int) { shutdown_requested.store(true, std::memory_order_relaxed); }
+
 struct RequestStats {
     std::atomic<std::uint64_t> total{0};
     std::atomic<std::uint64_t> client_errors{0};
@@ -45,6 +57,14 @@ std::string stats_json(const RequestStats& stats) {
         + ",\"server_errors_total\":" + std::to_string(stats.server_errors.load())
         + ",\"in_flight\":" + std::to_string(stats.in_flight.load()) + "}";
 }
+
+struct StaticAssets {
+    std::string index;
+    std::string script;
+    std::string analysis;
+    std::string stylesheet;
+    std::string favicon;
+};
 
 struct Configuration {
     std::string host = "127.0.0.1";
@@ -113,7 +133,7 @@ Configuration parse_args(int argc, char** argv) {
 http::response<http::string_body> response(http::status code, std::string body,
                                           std::string content_type = "application/json; charset=utf-8") {
     http::response<http::string_body> out{code, 11};
-    out.set(http::field::server, "EventHorizon/1.0");
+    out.set(http::field::server, "EventHorizon/2.1");
     out.set(http::field::content_type, content_type);
     out.set(http::field::cache_control, "no-store");
     out.set("X-Content-Type-Options", "nosniff");
@@ -133,11 +153,12 @@ http::response<http::string_body> error_response(http::status code, const std::s
 }
 
 http::response<http::string_body> route(const http::request<http::string_body>& req,
-                                        const Configuration& config, const RequestStats& stats) {
+                                        const Configuration& config, const RequestStats& stats,
+                                        const StaticAssets& assets) {
     const std::string path(req.target());
     if (req.method() == http::verb::get) {
         if (path == "/api/health") return response(http::status::ok,
-            "{\"status\":\"ok\",\"service\":\"event-horizon\",\"version\":\"2.0.0\"}");
+            "{\"status\":\"ok\",\"service\":\"event-horizon\",\"version\":\"2.1.0\"}");
         if (path == "/api/metrics") return response(http::status::ok, stats_json(stats));
         if (path == "/api/resilience") return response(http::status::ok, eh::resilience_matrix_json());
         if (path == "/api/resilience/case" || path.starts_with("/api/resilience/case?")) {
@@ -163,23 +184,23 @@ http::response<http::string_body> route(const http::request<http::string_body>& 
             }
         }
         if (path == "/" || path == "/index.html") {
-            return response(http::status::ok, read_file(config.web_directory + "/index.html"),
+            return response(http::status::ok, assets.index,
                             "text/html; charset=utf-8");
         }
         if (path == "/app.js") {
-            return response(http::status::ok, read_file(config.web_directory + "/app.js"),
+            return response(http::status::ok, assets.script,
                             "text/javascript; charset=utf-8");
         }
         if (path == "/insights.mjs") {
-            return response(http::status::ok, read_file(config.web_directory + "/insights.mjs"),
+            return response(http::status::ok, assets.analysis,
                             "text/javascript; charset=utf-8");
         }
         if (path == "/style.css") {
-            return response(http::status::ok, read_file(config.web_directory + "/style.css"),
+            return response(http::status::ok, assets.stylesheet,
                             "text/css; charset=utf-8");
         }
         if (path == "/favicon.svg") {
-            return response(http::status::ok, read_file(config.web_directory + "/favicon.svg"),
+            return response(http::status::ok, assets.favicon,
                             "image/svg+xml");
         }
         return error_response(http::status::not_found, "route not found");
@@ -200,7 +221,20 @@ http::response<http::string_body> route(const http::request<http::string_body>& 
     return error_response(http::status::method_not_allowed, "method not allowed");
 }
 
-void handle_connection(beast::tcp_stream& stream, const Configuration& config, RequestStats& stats) {
+void handle_connection(beast::tcp_stream& stream, const Configuration& config,
+                       RequestStats& stats, const StaticAssets& assets) {
+    // Beast expires_after governs asynchronous operations; this server uses
+    // synchronous reads/writes. The OS socket timeouts also cover stalled
+    // clients, preventing worker starvation and indefinite shutdown waits.
+    timeval read_timeout{5, 0};
+    timeval write_timeout{10, 0};
+    const auto socket = stream.socket().native_handle();
+    if (::setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO,
+                     &read_timeout, sizeof(read_timeout)) != 0 ||
+        ::setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO,
+                     &write_timeout, sizeof(write_timeout)) != 0) {
+        throw std::runtime_error("failed configuring client socket timeouts");
+    }
     stream.expires_after(std::chrono::seconds(5));
     beast::flat_buffer buffer;
     http::request_parser<http::string_body> parser;
@@ -218,7 +252,7 @@ void handle_connection(beast::tcp_stream& stream, const Configuration& config, R
     stats.in_flight.fetch_add(1);
     http::response<http::string_body> out;
     try {
-        out = route(parser.release(), config, stats);
+        out = route(parser.release(), config, stats, assets);
     } catch (const std::exception& e) {
         // Path and system errors are not printed into the response.
         std::cerr << "server request failed: " << e.what() << '\n';
@@ -236,13 +270,17 @@ void handle_connection(beast::tcp_stream& stream, const Configuration& config, R
 
 class WorkerQueue {
 public:
+    WorkerQueue() { active_.reserve(8); } // Maximum configured worker count.
+
     void submit(std::unique_ptr<beast::tcp_stream> stream) {
         std::unique_lock<std::mutex> lock(mutex_);
-        if (queue_.size() >= 64) {
+        if (stopping_ || queue_.size() >= 64) {
             lock.unlock();
-            const auto out = error_response(http::status::service_unavailable, "server is busy");
+            // Never write a busy response on the accept thread: a client that
+            // stops reading could otherwise block new connections indefinitely.
             beast::error_code ec;
-            http::write(*stream, out, ec);
+            stream->socket().shutdown(tcp::socket::shutdown_both, ec);
+            stream->socket().close(ec);
             return;
         }
         queue_.push_back(std::move(stream));
@@ -251,13 +289,53 @@ public:
 
     std::unique_ptr<beast::tcp_stream> take() {
         std::unique_lock<std::mutex> lock(mutex_);
-        ready_.wait(lock, [this] { return !queue_.empty(); });
+        ready_.wait(lock, [this] { return stopping_ || !queue_.empty(); });
+        if (stopping_) return nullptr;
         auto stream = std::move(queue_.front());
         queue_.pop_front();
+        active_.push_back({stream.get(), std::chrono::steady_clock::now(), false});
         return stream;
     }
 
+    void complete(beast::tcp_stream* stream) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::erase_if(active_, [stream](const Active& item) { return item.stream == stream; });
+    }
+
+    // SO_RCVTIMEO alone does not bound every library-level synchronous read.
+    // Interrupt stalled sockets from the accept thread after five seconds.
+    void expire_active() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto now = std::chrono::steady_clock::now();
+        for (auto& item : active_) {
+            if (!item.closed && now - item.started >= std::chrono::seconds(5)) {
+                ::shutdown(item.stream->socket().native_handle(), SHUT_RDWR);
+                item.closed = true;
+            }
+        }
+    }
+
+    void stop() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        stopping_ = true;
+        queue_.clear();
+        for (auto& item : active_) {
+            if (!item.closed) {
+                ::shutdown(item.stream->socket().native_handle(), SHUT_RDWR);
+                item.closed = true;
+            }
+        }
+        ready_.notify_all();
+    }
+
 private:
+    struct Active {
+        beast::tcp_stream* stream;
+        std::chrono::steady_clock::time_point started;
+        bool closed;
+    };
+    std::vector<Active> active_;
+    bool stopping_ = false;
     std::deque<std::unique_ptr<beast::tcp_stream>> queue_;
     std::mutex mutex_;
     std::condition_variable ready_;
@@ -268,12 +346,20 @@ private:
 int main(int argc, char** argv) {
     try {
         const auto config = parse_args(argc, argv);
-        // Fail at startup if the configured paths are unusable.
-        (void)read_file(config.web_directory + "/index.html");
+        // Assets are immutable after startup; avoid per-request filesystem I/O.
+        // Load all five files up front so missing assets fail fast.
+        const StaticAssets assets{
+            read_file(config.web_directory + "/index.html"),
+            read_file(config.web_directory + "/app.js"),
+            read_file(config.web_directory + "/insights.mjs"),
+            read_file(config.web_directory + "/style.css"),
+            read_file(config.web_directory + "/favicon.svg")};
         (void)eh::run_scenario(config.data_directory, "baseline");
 #ifdef SIGPIPE
         std::signal(SIGPIPE, SIG_IGN);
 #endif
+        std::signal(SIGINT, request_shutdown);
+        std::signal(SIGTERM, request_shutdown);
         net::io_context io;
         const auto address = net::ip::make_address(config.host);
         tcp::acceptor acceptor(io);
@@ -281,30 +367,52 @@ int main(int argc, char** argv) {
         acceptor.set_option(net::socket_base::reuse_address(true));
         acceptor.bind(tcp::endpoint(address, config.port));
         acceptor.listen(net::socket_base::max_listen_connections);
+        // A short nonblocking poll makes SIGTERM portable across native and
+        // container builds without detached threads or unsafe signal IO.
+        acceptor.non_blocking(true);
         WorkerQueue queue;
         RequestStats stats;
         std::vector<std::thread> workers;
         for (int i = 0; i < config.workers; ++i) {
-            workers.emplace_back([&queue, &config, &stats] {
-                while (true) {
-                    auto stream = queue.take();
-                    try { handle_connection(*stream, config, stats); }
+            workers.emplace_back([&queue, &config, &stats, &assets] {
+                while (auto stream = queue.take()) {
+                    try { handle_connection(*stream, config, stats, assets); }
                     catch (const std::exception& e) {
                         std::cerr << "connection failed: " << e.what() << '\n';
                     }
+                    queue.complete(stream.get());
                 }
             });
         }
-        for (auto& worker : workers) worker.detach();
+
         std::cout << "EVENT HORIZON | http://" << config.host << ':' << config.port
                   << " | workers=" << config.workers << std::endl;
-        while (true) {
+        while (!shutdown_requested.load(std::memory_order_relaxed)) {
+            queue.expire_active();
+            // Poll the listening socket, not a fixed sleep: accept requests
+            // immediately while still checking the stop flag every 100 ms.
+            pollfd listening{acceptor.native_handle(), POLLIN, 0};
+            const int ready = ::poll(&listening, 1, 100);
+            if (ready == 0) continue;
+            if (ready < 0) {
+                if (errno == EINTR) continue;
+                throw std::runtime_error("listener poll failed");
+            }
             auto stream = std::make_unique<beast::tcp_stream>(io);
             beast::error_code ec;
             acceptor.accept(stream->socket(), ec);
-            if (ec) { std::cerr << "accept error: " << ec.message() << '\n'; continue; }
+            if (ec == net::error::would_block || ec == net::error::try_again) continue;
+            if (ec) {
+                if (!shutdown_requested.load(std::memory_order_relaxed)) std::cerr << "accept error: " << ec.message() << '\n';
+                continue;
+            }
             queue.submit(std::move(stream));
         }
+        beast::error_code ec;
+        acceptor.close(ec);
+        queue.stop();
+        for (auto& worker : workers) worker.join();
+        std::cout << "EVENT HORIZON | shutdown complete" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "SERVER ERROR: " << e.what() << '\n';
         return 1;

@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <map>
 #include <string>
 #include <vector>
@@ -97,7 +96,7 @@ public:
     std::vector<OrderView> open_orders() const;
     const std::vector<TradeView>& trades() const { return trades_; }
     const Metrics& metrics() const { return metrics_; }
-    std::size_t pending_trade_count() const { return pending_.size(); }
+    std::size_t pending_trade_count() const { return pending_.size() - pending_head_; }
     std::int64_t clearing_cash_cents() const { return clearing_cash_cents_; }
     std::int64_t clearing_shares() const { return clearing_shares_; }
     std::int64_t initial_cash_cents() const { return initial_cash_cents_; }
@@ -129,15 +128,15 @@ private:
     };
 
     bool crosses(const Order& incoming, const Order& resting) const;
-    Order* best_match(const Order& incoming);
-    void execute_fill(Order& incoming, Order& resting, std::int64_t quantity);
+    void execute_fill(Order& incoming, Order& resting, std::int64_t quantity, TradeView&& prepared_trade);
     Result reject_order(const std::string& reason, bool risk = false);
     bool price_outside_band(std::int64_t price) const;
 
     std::map<std::string, Account> accounts_;
     std::vector<Order> orders_;
     std::map<std::string, bool> used_order_ids_;
-    std::deque<PendingTrade> pending_;
+    std::vector<PendingTrade> pending_;
+    std::size_t pending_head_ = 0;
     std::vector<TradeView> trades_;
     std::map<std::string, std::int64_t> loans_;
     Metrics metrics_;

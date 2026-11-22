@@ -79,10 +79,24 @@ export const STORIES = Object.freeze({
   },
 });
 
-export const money = (cents) => new Intl.NumberFormat('en-US', {
-  style: 'currency', currency: 'USD', minimumFractionDigits: 0,
-  maximumFractionDigits: 2,
-}).format(Number(cents || 0) / 100);
+// Monetary API fields stay numeric while safe and become decimal strings above
+// 2^53-1. Never pass an already-rounded JS number into an accounting display.
+export function centsInteger(value) {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return BigInt(value);
+  if (typeof value === 'string' && /^-?\d+$/.test(value)) return BigInt(value);
+  throw new RangeError('Money requires integer cents represented without rounding');
+}
+
+const usdGrouping = new Intl.NumberFormat('en-US');
+export function money(value) {
+  const cents = centsInteger(value ?? 0);
+  const magnitude = cents < 0n ? -cents : cents;
+  const dollars = magnitude / 100n;
+  const remainder = magnitude % 100n;
+  const fraction = remainder === 0n ? '' : `.${String(remainder).padStart(2, '0')}`;
+  return `${cents < 0n ? '-' : ''}$${usdGrouping.format(dollars)}${fraction}`;
+}
 export const integer = (n) => new Intl.NumberFormat('en-US').format(Number(n || 0));
 export const shortCommand = (command = '') => String(command).split(',')[0].trim();
 

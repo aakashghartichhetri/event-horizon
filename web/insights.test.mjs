@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STORIES, snapshotAt, eventMeaning, classification, eventPoints, money, fileSafeName, buildTradeCsv, resilienceOutcome } from './insights.mjs';
+import { STORIES, snapshotAt, eventMeaning, classification, eventPoints, money, centsInteger, fileSafeName, buildTradeCsv, resilienceOutcome } from './insights.mjs';
 
 const scenario = {
   timeline: [
@@ -49,4 +49,15 @@ test('resilience classification reflects delivered trades, not risk probabilitie
   assert.equal(resilienceOutcome({settled:3}), 'complete');
   assert.equal(resilienceOutcome({settled:1}), 'partial');
   assert.equal(resilienceOutcome({settled:0}), 'blocked');
+});
+
+test('large cents remain exact across API and UI boundaries', () => {
+  assert.equal(money('9007199254740993'), '$90,071,992,547,409.93');
+  assert.equal(money('-9007199254740993'), '-$90,071,992,547,409.93');
+  assert.equal(money('9100000000000000'), '$91,000,000,000,000');
+  assert.equal(centsInteger('9007199254740993') + 1n, 9007199254740994n);
+  assert.throws(() => money(9007199254740993), RangeError);
+  assert.throws(() => money(1.02), RangeError);
+  assert.match(buildTradeCsv([{id:1,seller:'A',buyer:'B',quantity:2,
+    price_cents:100,cash_cents:'9007199254740993',settled:true}]), /9007199254740993/);
 });

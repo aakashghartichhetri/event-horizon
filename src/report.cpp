@@ -22,6 +22,14 @@ const std::vector<Scenario> kCatalog = {
 
 std::string bool_json(bool value) { return value ? "true" : "false"; }
 
+// Emit small integers as JSON numbers for existing clients. Large integers are
+// decimal strings: JSON.parse would otherwise round cents above 2^53 - 1.
+std::string exact_cents_json(std::int64_t value) {
+    constexpr std::int64_t safe = 9'007'199'254'740'991;
+    const auto digits = std::to_string(value);
+    return value > safe || value < -safe ? "\"" + digits + "\"" : digits;
+}
+
 }  // namespace
 
 std::string json_escape(std::string_view text) {
@@ -99,26 +107,26 @@ std::string to_json(const Simulation& s, std::string_view scenario_id) {
         << ",\"loan_disbursements\":" << m.loan_disbursements
         << ",\"loan_repayments\":" << m.loan_repayments
         << ",\"risk_rejections\":" << m.risk_rejections
-        << ",\"traded_notional_cents\":" << m.traded_notional_cents
-        << ",\"peak_clearing_cash_cents\":" << m.peak_clearing_cash_cents
+        << ",\"traded_notional_cents\":" << exact_cents_json(m.traded_notional_cents)
+        << ",\"peak_clearing_cash_cents\":" << exact_cents_json(m.peak_clearing_cash_cents)
         << ",\"pending_trades\":" << e.pending_trade_count()
         << ",\"open_orders\":" << e.active_order_count()
-        << ",\"clearing_cash_cents\":" << e.clearing_cash_cents()
+        << ",\"clearing_cash_cents\":" << exact_cents_json(e.clearing_cash_cents())
         << ",\"clearing_shares\":" << e.clearing_shares()
         << "},\"invariants\":{\"passed\":true"
-        << ",\"cash_initial_cents\":" << e.initial_cash_cents()
+        << ",\"cash_initial_cents\":" << exact_cents_json(e.initial_cash_cents())
         << ",\"shares_initial\":" << e.initial_shares()
-        << "},\"risk\":{\"max_order_notional_cents\":" << e.max_order_notional_cents()
-        << ",\"reference_price_cents\":" << e.reference_price_cents()
+        << "},\"risk\":{\"max_order_notional_cents\":" << exact_cents_json(e.max_order_notional_cents())
+        << ",\"reference_price_cents\":" << exact_cents_json(e.reference_price_cents())
         << ",\"deviation_bps\":" << e.deviation_bps() << "},\"accounts\":[";
     bool first = true;
     for (const auto& a : e.accounts()) {
         if (!first) out << ',';
         first = false;
         out << "{\"name\":" << json_escape(a.name)
-            << ",\"cash_cents\":" << a.cash_cents
-            << ",\"reserved_cash_cents\":" << a.reserved_cash_cents
-            << ",\"available_cash_cents\":" << a.available_cash_cents()
+            << ",\"cash_cents\":" << exact_cents_json(a.cash_cents)
+            << ",\"reserved_cash_cents\":" << exact_cents_json(a.reserved_cash_cents)
+            << ",\"available_cash_cents\":" << exact_cents_json(a.available_cash_cents())
             << ",\"shares\":" << a.shares
             << ",\"reserved_shares\":" << a.reserved_shares
             << ",\"available_shares\":" << a.available_shares() << '}';
@@ -132,7 +140,7 @@ std::string to_json(const Simulation& s, std::string_view scenario_id) {
             << ",\"owner\":" << json_escape(order.owner)
             << ",\"side\":" << json_escape(side_to_string(order.side))
             << ",\"remaining\":" << order.remaining
-            << ",\"price_cents\":" << order.price_cents
+            << ",\"price_cents\":" << exact_cents_json(order.price_cents)
             << ",\"sequence\":" << order.sequence << '}';
     }
     out << "],\"trades\":[";
@@ -146,8 +154,8 @@ std::string to_json(const Simulation& s, std::string_view scenario_id) {
             << ",\"buy_order_id\":" << json_escape(trade.buy_order_id)
             << ",\"sell_order_id\":" << json_escape(trade.sell_order_id)
             << ",\"quantity\":" << trade.quantity
-            << ",\"price_cents\":" << trade.price_cents
-            << ",\"cash_cents\":" << trade.cash_cents
+            << ",\"price_cents\":" << exact_cents_json(trade.price_cents)
+            << ",\"cash_cents\":" << exact_cents_json(trade.cash_cents)
             << ",\"settled\":" << bool_json(trade.settled) << '}';
     }
     out << "],\"loans\":[";
@@ -156,7 +164,7 @@ std::string to_json(const Simulation& s, std::string_view scenario_id) {
         if (!first) out << ',';
         first = false;
         out << "{\"borrower\":" << json_escape(borrower)
-            << ",\"outstanding_cents\":" << cents << '}';
+            << ",\"outstanding_cents\":" << exact_cents_json(cents) << '}';
     }
     out << "],\"timeline\":[";
     first = true;
@@ -168,7 +176,7 @@ std::string to_json(const Simulation& s, std::string_view scenario_id) {
             << ",\"command\":" << json_escape(ev.command)
             << ",\"status\":" << json_escape(ev.status)
             << ",\"message\":" << json_escape(ev.message)
-            << ",\"clearing_cash_cents\":" << ev.clearing_cash_cents
+            << ",\"clearing_cash_cents\":" << exact_cents_json(ev.clearing_cash_cents)
             << ",\"pending_trades\":" << ev.pending_trades
             << ",\"trades_executed\":" << ev.trades_executed
             << ",\"trades_settled\":" << ev.trades_settled
@@ -181,9 +189,9 @@ std::string to_json(const Simulation& s, std::string_view scenario_id) {
             if (!first_account) out << ',';
             first_account = false;
             out << "{\"name\":" << json_escape(account.name)
-                << ",\"cash_cents\":" << account.cash_cents
-                << ",\"available_cash_cents\":" << account.available_cash_cents()
-                << ",\"reserved_cash_cents\":" << account.reserved_cash_cents
+                << ",\"cash_cents\":" << exact_cents_json(account.cash_cents)
+                << ",\"available_cash_cents\":" << exact_cents_json(account.available_cash_cents())
+                << ",\"reserved_cash_cents\":" << exact_cents_json(account.reserved_cash_cents)
                 << ",\"shares\":" << account.shares
                 << ",\"available_shares\":" << account.available_shares() << '}';
         }
@@ -223,9 +231,9 @@ std::string comparison_json(const std::string& directory) {
             << ",\"settled\":" << m.trades_settled
             << ",\"rejected\":" << m.rejected_orders
             << ",\"pending\":" << e.pending_trade_count()
-            << ",\"escrow_cents\":" << e.clearing_cash_cents()
+            << ",\"escrow_cents\":" << exact_cents_json(e.clearing_cash_cents())
             << ",\"risk_rejections\":" << m.risk_rejections
-            << ",\"cash_initial_cents\":" << e.initial_cash_cents()
+            << ",\"cash_initial_cents\":" << exact_cents_json(e.initial_cash_cents())
             << '}';
     }
     return out.str() + "]}";

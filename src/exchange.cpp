@@ -96,35 +96,16 @@ bool Exchange::crosses(const Order& incoming, const Order& resting) const {
                                      : incoming.price_cents <= resting.price_cents;
 }
 
-Exchange::Order* Exchange::best_match(const Order& incoming) {
-    Order* best = nullptr;
-    for (auto& candidate : orders_) {
-        if (!crosses(incoming, candidate)) continue;
-        if (best == nullptr ||
-            (incoming.side == Side::buy && candidate.price_cents < best->price_cents) ||
-            (incoming.side == Side::sell && candidate.price_cents > best->price_cents) ||
-            (candidate.price_cents == best->price_cents && candidate.sequence < best->sequence)) {
-            best = &candidate;
-        }
-    }
-    return best;
-}
-
-void Exchange::execute_fill(Order& incoming, Order& resting, std::int64_t qty) {
+void Exchange::execute_fill(Order& incoming, Order& resting, std::int64_t qty,
+                            TradeView&& prepared_trade) {
     Order& buy = incoming.side == Side::buy ? incoming : resting;
     Order& sell = incoming.side == Side::sell ? incoming : resting;
-    const auto price = resting.price_cents; // Resting-order price determines execution.
-    const auto cash = price * qty;
+    const auto cash = resting.price_cents * qty;
 
-    const std::size_t index = trades_.size();
-    trades_.push_back(TradeView{static_cast<std::uint64_t>(index + 1), buy.owner,
-        sell.owner, buy.id, sell.id, qty, price, cash, false});
-    try {
-        pending_.push_back({index});
-    } catch (...) {
-        trades_.pop_back();
-        throw;
-    }
+    // All allocations happened before the first balance change. Both pushes
+    // move prepared records into reserved vectors and cannot allocate here.
+    pending_.push_back({trades_.size()});
+    trades_.push_back(std::move(prepared_trade));
 
     Account& buyer = accounts_.at(buy.owner);
     Account& seller = accounts_.at(sell.owner);
@@ -158,14 +139,42 @@ Result Exchange::place_order(const std::string& id, const std::string& owner,
         return reject_order("order exceeds risk notional limit", true);
     }
 
+    // Plan executions before touching balances. A worse-priced self-order or
+    // out-of-band quote must not reject an order filled entirely at better prices.
+    // Sorting once also avoids rescanning the whole book after every partial fill.
     Order incoming{id, owner, side, quantity, price_cents, next_sequence_};
-    for (const auto& resting : orders_) {
-        if (!crosses(incoming, resting)) continue;
+    std::vector<std::size_t> crossing;
+    for (std::size_t i = 0; i < orders_.size(); ++i) {
+        if (crosses(incoming, orders_[i])) crossing.push_back(i);
+    }
+    std::sort(crossing.begin(), crossing.end(), [&](std::size_t a, std::size_t b) {
+        const Order& left = orders_[a];
+        const Order& right = orders_[b];
+        if (left.price_cents != right.price_cents) {
+            return side == Side::buy ? left.price_cents < right.price_cents
+                                     : left.price_cents > right.price_cents;
+        }
+        return left.sequence < right.sequence;
+    });
+    struct PlannedFill { std::size_t index; std::int64_t quantity; };
+    std::vector<PlannedFill> plan;
+    std::int64_t unfilled = quantity;
+    for (const auto index : crossing) {
+        if (unfilled == 0) break;
+        const Order& resting = orders_[index];
         if (resting.owner == owner) return reject_order("self-trade prevented", true);
         if (price_outside_band(resting.price_cents)) {
             return reject_order("circuit breaker: execution outside price band", true);
         }
+        // Limit applies to *all* fills, not just the trade count at admission.
+        if (trades_.size() + plan.size() >= kMaxOrders) {
+            return reject_order("trade history limit reached");
+        }
+        const auto filled = std::min(unfilled, resting.remaining);
+        plan.push_back({index, filled});
+        unfilled -= filled;
     }
+
     Account& account = accounts_.at(owner);
     const auto cash_required = price_cents * quantity;
     if (side == Side::buy && cash_required > account.cash_cents - account.reserved_cash_cents) {
@@ -175,18 +184,44 @@ Result Exchange::place_order(const std::string& id, const std::string& owner,
         return reject_order("insufficient available shares");
     }
 
-    // Reserve before matching. Unfilled quantity remains reserved as a resting order.
+    // A multi-fill order is one accounting transaction: build every record and
+    // reserve vector capacity before any cash, shares or reservations change.
+    // Allocation failure here leaves the engine exactly as it was before admission.
+    std::vector<TradeView> prepared_trades;
+    prepared_trades.reserve(plan.size());
+    for (const auto& fill : plan) {
+        const Order& resting = orders_[fill.index];
+        const Order& buy = side == Side::buy ? incoming : resting;
+        const Order& sell = side == Side::sell ? incoming : resting;
+        prepared_trades.push_back(TradeView{
+            static_cast<std::uint64_t>(trades_.size() + prepared_trades.size() + 1),
+            buy.owner, sell.owner, buy.id, sell.id, fill.quantity,
+            resting.price_cents, resting.price_cents * fill.quantity, false});
+    }
+    // Grow geometrically instead of reserving exactly one extra slot on each
+    // order. That avoids quadratic copying during large, repeated workloads.
+    const auto prepare_capacity = [](auto& items, std::size_t need) {
+        if (need > items.capacity()) {
+            items.reserve(std::max(need, std::max(std::size_t{16}, items.capacity() * 2)));
+        }
+    };
+    prepare_capacity(trades_, trades_.size() + plan.size());
+    prepare_capacity(pending_, pending_.size() + plan.size());
+    if (unfilled > 0) prepare_capacity(orders_, orders_.size() + 1);
+    // Insert the ID last: even map node allocation cannot fail after mutation.
+    used_order_ids_.emplace(id, true);
+
+    // Reserve the incoming limit price, then execute only the prechecked fills.
     if (side == Side::buy) account.reserved_cash_cents += cash_required;
     else account.reserved_shares += quantity;
     ++next_sequence_;
-    while (incoming.remaining > 0) {
-        Order* resting = best_match(incoming);
-        if (resting == nullptr) break;
-        execute_fill(incoming, *resting, std::min(incoming.remaining, resting->remaining));
+    for (std::size_t i = 0; i < plan.size(); ++i) {
+        const auto& fill = plan[i];
+        execute_fill(incoming, orders_[fill.index], fill.quantity,
+                     std::move(prepared_trades[i]));
     }
-    if (incoming.remaining > 0) orders_.push_back(incoming);
+    if (incoming.remaining > 0) orders_.push_back(std::move(incoming));
     std::erase_if(orders_, [](const Order& order) { return order.remaining == 0; });
-    used_order_ids_.emplace(id, true);
     ++metrics_.accepted_orders;
     return {true, "order " + id + " accepted"};
 }
@@ -216,12 +251,15 @@ Result Exchange::lend(const std::string& borrower, std::int64_t cents) {
     if (source.cash_cents - source.reserved_cash_cents < cents) {
         return {false, "facility has insufficient available cash"};
     }
-    if (!can_add(target.cash_cents, cents) || !can_add(loans_[borrower], cents)) {
+    const auto existing = loans_.find(borrower);
+    const auto outstanding = existing == loans_.end() ? 0 : existing->second;
+    if (!can_add(target.cash_cents, cents) || !can_add(outstanding, cents)) {
         return {false, "loan would overflow"};
     }
+    // Rejections must not create empty debt entries in the facility ledger.
+    loans_[borrower] = outstanding + cents;
     source.cash_cents -= cents;
     target.cash_cents += cents;
-    loans_[borrower] += cents;
     ++metrics_.loan_disbursements;
     return {true, "loan disbursed to " + borrower};
 }
@@ -229,7 +267,10 @@ Result Exchange::lend(const std::string& borrower, std::int64_t cents) {
 Result Exchange::repay(const std::string& borrower, std::int64_t cents) {
     if (borrower == "FACILITY" || !accounts_.contains(borrower) ||
         !accounts_.contains("FACILITY")) return {false, "unknown borrower or facility"};
-    if (cents <= 0 || loans_[borrower] < cents) return {false, "repayment exceeds outstanding loan"};
+    const auto debt = loans_.find(borrower);
+    if (cents <= 0 || debt == loans_.end() || debt->second < cents) {
+        return {false, "repayment exceeds outstanding loan"};
+    }
     Account& account = accounts_.at(borrower);
     Account& facility = accounts_.at("FACILITY");
     if (account.cash_cents - account.reserved_cash_cents < cents) {
@@ -238,12 +279,13 @@ Result Exchange::repay(const std::string& borrower, std::int64_t cents) {
     if (!can_add(facility.cash_cents, cents)) return {false, "facility cash would overflow"};
     account.cash_cents -= cents;
     facility.cash_cents += cents;
-    loans_[borrower] -= cents;
+    debt->second -= cents;
+    if (debt->second == 0) loans_.erase(debt);
     ++metrics_.loan_repayments;
     return {true, "loan repaid by " + borrower};
 }
 
-SettlementResult Exchange::settle_all() { return settle_batch(pending_.size()); }
+SettlementResult Exchange::settle_all() { return settle_batch(pending_trade_count()); }
 
 SettlementResult Exchange::settle_batch(std::size_t limit) {
     if (!payments_online_) {
@@ -252,17 +294,22 @@ SettlementResult Exchange::settle_batch(std::size_t limit) {
     }
     ++metrics_.settlement_cycles;
     std::size_t settled = 0;
-    while (!pending_.empty() && settled < limit) {
-        TradeView& trade = trades_.at(pending_.front().trade_index);
+    while (pending_head_ < pending_.size() && settled < limit) {
+        TradeView& trade = trades_.at(pending_[pending_head_].trade_index);
         // Delivery-versus-payment: both transfers happen from escrow in one step.
         accounts_.at(trade.seller).cash_cents += trade.cash_cents;
         accounts_.at(trade.buyer).shares += trade.quantity;
         clearing_cash_cents_ -= trade.cash_cents;
         clearing_shares_ -= trade.quantity;
         trade.settled = true;
-        pending_.pop_front();
+        ++pending_head_;
         ++metrics_.trades_settled;
         ++settled;
+    }
+    // Once all obligations are discharged, reclaim the queue slots for reuse.
+    if (pending_head_ == pending_.size()) {
+        pending_.clear();
+        pending_head_ = 0;
     }
     return {settled, false};
 }
@@ -314,7 +361,8 @@ void Exchange::verify_invariants() const {
     }
     std::int64_t pending_cash = 0;
     std::int64_t pending_shares = 0;
-    for (const auto& item : pending_) {
+    for (std::size_t i = pending_head_; i < pending_.size(); ++i) {
+        const auto& item = pending_[i];
         const auto& trade = trades_.at(item.trade_index);
         if (trade.settled) throw std::logic_error("settled trade still pending");
         pending_cash += trade.cash_cents;
@@ -336,7 +384,7 @@ void Exchange::verify_invariants() const {
     }
     if (metrics_.trades_executed != static_cast<std::int64_t>(trades_.size()) ||
         metrics_.trades_settled != static_cast<std::int64_t>(settled_count) ||
-        trades_.size() - settled_count != pending_.size() ||
+        trades_.size() - settled_count != pending_trade_count() ||
         metrics_.traded_notional_cents != recorded_notional) {
         throw std::logic_error("trade ledger does not match settlement counters");
     }
